@@ -1,0 +1,31 @@
+Configurar emuladores e jogos no My Games
+=========================================
+
+1. Abra My Games e clique na engrenagem.
+2. Expanda o console desejado.
+3. Clique em "Selecionar emulador" e escolha manualmente a pasta do emulador.
+   - A pasta precisa conter o executável/AppImage ou atalho .desktop do emulador.
+   - Para Flatpak, escolha a pasta de dados em ~/.var/app, por exemplo
+     ~/.var/app/com.snes9x.Snes9x. O My Games identifica o ID e inicia com
+     `flatpak run`; o Flatpak precisa estar instalado no sistema.
+4. A pasta escolhida fica salva para as próximas vezes. Para trocar, escolha
+   outra pasta em "Selecionar emulador"; para limpar a associação, clique em
+   "Remover".
+5. Clique em "Selecionar pasta de jogos" e escolha onde estão os jogos daquele
+   console. A pasta também fica salva e pode ser alterada ou removida.
+6. Na tela principal, dê dois cliques na imagem do console para ver a lista.
+   Clique no nome do jogo para iniciar o emulador com esse jogo.
+
+As configurações são guardadas nos arquivos emulators.json e games.json.
+Emuladores selecionados dentro da pasta do My Games são salvos com caminho
+relativo, para continuar funcionando se o projeto for movido como um todo.
+Pastas escolhidas fora do projeto são salvas com o caminho completo e precisam
+permanecer nesse local.
+
+Os executáveis dos emuladores não estão incluídos no My Games. Instale ou
+adicione à pasta do projeto os emuladores que deseja usar, respeitando suas
+licenças e dependências.
+
+São encontrados arquivos de jogos em formatos comuns, incluindo ISO, CHD, ROM,
+ZIP, GBA, SFC/SMC, N64/Z64/V64, GCM/GCZ, WBFS e outros. A busca também inclui
+subpastas. Um clique simples seleciona o console.

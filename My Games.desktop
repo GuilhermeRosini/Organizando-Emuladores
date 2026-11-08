@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=My Games
+Comment=Organize e abra seus jogos por console
+Exec="/home/guilherme/Documentos/Jogos Organizados/iniciar_jogos.sh"
+Icon=/home/guilherme/.local/share/icons/hicolor/512x512/apps/my-games.png
+Terminal=false
+Categories=Game;
+StartupNotify=true

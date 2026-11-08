@@ -1,0 +1,24 @@
+As imagens exibidas no My Games são PNGs com fundo transparente. As imagens
+console-outline.png são halos brancos transparentes que acompanham a silhueta
+das imagens console.png.
+
+PlayStation 2 — ps2/console.png (original: ps2/console.jpg)
+https://commons.wikimedia.org/wiki/File:PS2-Fat-Console-Set.jpg
+
+Super Nintendo — super nintendo/console.png: imagem fornecida pelo usuário.
+O arquivo console.jpg é a imagem anterior e não é usado na interface.
+Imagem anterior:
+https://commons.wikimedia.org/wiki/File:Nintendo-Super-NES-Console-101-FL.jpg
+
+As fotografias originais abaixo são de Evan-Amos e as páginas do Wikimedia
+Commons indicam que estão em domínio público.
+
+Game Boy Advance — gameboy advance/console.png (original: gameboy advance/console.jpg)
+https://commons.wikimedia.org/wiki/File:Nintendo-Game-Boy-Advance-Milky-Blue-FL.jpg
+
+GameCube — gamecube/console.png (original: gamecube/console.jpg)
+https://commons.wikimedia.org/wiki/File:GameCube-Set.jpg
+
+Nintendo 64 — nintendo 64/console.png
+https://commons.wikimedia.org/wiki/File:N64-Console-Set.png
+Imagem de Evan-Amos, em domínio público.
