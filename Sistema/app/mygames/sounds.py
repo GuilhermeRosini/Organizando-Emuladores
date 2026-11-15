@@ -4,8 +4,8 @@ O som não é um arquivo baixado: é gerado aqui mesmo (um "tic" curto, parecido
 com o clique de um mouse) e salvo uma vez na pasta de cache.
 
 Como toca:
-- Linux: GStreamer (já vem no Ubuntu/GNOME). O tocador fica preparado e só
-  volta ao começo a cada clique, para o som sair na hora, sem atraso.
+- Linux: GStreamer (já vem no Ubuntu/GNOME). Um fluxo de áudio fica aberto
+  tocando silêncio, e cada clique entra nele, para o som sair sempre e na hora.
 - Windows: winsound, que já vem no Python do runtime.
 Se nada disso existir, o hub simplesmente fica sem som (nunca dá erro).
 """
@@ -16,8 +16,6 @@ import sys
 import threading
 import time
 import wave
-
-from gi.repository import GLib
 
 from .paths import CACHE_DIR, IS_WINDOWS
 
@@ -62,10 +60,19 @@ def click_file():
 
 
 class _GstPlayer:
-    """Tocador do Linux: alguns tocadores prontos que se revezam (cliques seguidos se sobrepõem)."""
+    """Tocador do Linux: um fluxo de áudio que nunca para.
+
+    O PipeWire/PulseAudio não toca um som tão curto quando o fluxo fica sem
+    dados: depois de um silêncio ele espera juntar bastante áudio antes de
+    voltar a tocar, e o clique nunca chega a isso (por isso só o primeiro
+    saía). Então o fluxo é alimentado o tempo todo com pedacinhos de 10 ms
+    de silêncio, e quando há um clique os pedacinhos levam o clique.
+    """
+
+    CHUNK_SECONDS = 0.01
 
     def __init__(self, path):
-        """Prepara os tocadores já carregados com o som."""
+        """Abre o fluxo de áudio e guarda o som já pronto na memória."""
         import gi
 
         gi.require_version("Gst", "1.0")
@@ -73,39 +80,75 @@ class _GstPlayer:
 
         Gst.init(None)
         self.Gst = Gst
-        self.players = []
-        for _ in range(3):
-            player = Gst.ElementFactory.make("playbin", None)
-            if player is None:
-                raise RuntimeError("GStreamer sem playbin")
-            player.set_property("uri", path.as_uri())
-            player.set_property("video-sink", Gst.ElementFactory.make("fakesink", None))
-            player.set_state(Gst.State.PAUSED)  # já deixa o som carregado
-            self.players.append(player)
-        self.next = 0
-        self.plays = {}  # quantas vezes cada tocador foi usado (para pausar depois)
+        with wave.open(str(path), "rb") as source:
+            rate = source.getframerate()
+            channels = source.getnchannels()
+            self.data = source.readframes(source.getnframes())
+
+        frames = int(rate * self.CHUNK_SECONDS)
+        self.chunk_bytes = frames * channels * 2
+        self.chunk_duration = Gst.util_uint64_scale(frames, Gst.SECOND, rate)
+        self.silence = bytes(self.chunk_bytes)
+        self.timestamp = 0
+        self.lock = threading.Lock()
+        self.offset = None  # onde está o clique sendo tocado (None = silêncio)
+
+        self.pipeline = Gst.Pipeline.new("click-sound")
+        self.source = Gst.ElementFactory.make("appsrc", None)
+        convert = Gst.ElementFactory.make("audioconvert", None)
+        resample = Gst.ElementFactory.make("audioresample", None)
+        sink = None
+        for name in ("pulsesink", "pipewiresink", "autoaudiosink"):
+            sink = Gst.ElementFactory.make(name, None)
+            if sink is not None:
+                break
+        if None in (self.source, convert, resample, sink):
+            raise RuntimeError("GStreamer sem os elementos de áudio")
+
+        caps = Gst.Caps.from_string(
+            f"audio/x-raw,format=S16LE,layout=interleaved,rate={rate},channels={channels}")
+        self.source.set_property("caps", caps)
+        self.source.set_property("format", Gst.Format.TIME)
+        self.source.set_property("max-bytes", self.chunk_bytes)  # pouco adiantado = pouco atraso
+        self.source.connect("need-data", self._on_need_data)
+        # Buffer pequeno na saída: o clique sai rápido depois da tecla.
+        if sink.find_property("buffer-time") is not None:
+            sink.set_property("buffer-time", 60_000)
+            sink.set_property("latency-time", 10_000)
+
+        for element in (self.source, convert, resample, sink):
+            self.pipeline.add(element)
+        self.source.link(convert)
+        convert.link(resample)
+        resample.link(sink)
+        if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("não foi possível abrir a saída de áudio")
+
+    def _on_need_data(self, source, _length):
+        """O fluxo pediu mais áudio: manda o próximo pedaço (clique ou silêncio)."""
+        with self.lock:
+            if self.offset is None:
+                data = self.silence
+            else:
+                data = self.data[self.offset:self.offset + self.chunk_bytes]
+                self.offset += self.chunk_bytes
+                if self.offset >= len(self.data):
+                    self.offset = None
+                data = data.ljust(self.chunk_bytes, b"\0")
+        buffer = self.Gst.Buffer.new_wrapped(data)
+        buffer.pts = self.timestamp
+        buffer.duration = self.chunk_duration
+        self.timestamp += self.chunk_duration
+        source.emit("push-buffer", buffer)
 
     def play(self):
-        """Toca o clique do começo."""
-        Gst = self.Gst
-        player = self.players[self.next]
-        self.next = (self.next + 1) % len(self.players)
-        player.seek_simple(Gst.Format.TIME, Gst.SeekFlags.FLUSH | Gst.SeekFlags.ACCURATE, 0)
-        player.set_state(Gst.State.PLAYING)
-        # Depois do som, pausa de novo (não deixa a saída de áudio ocupada à toa).
-        self.plays[player] = self.plays.get(player, 0) + 1
-        GLib.timeout_add(250, self._rest, player, self.plays[player])
-
-    def _rest(self, player, play_number):
-        """Pausa o tocador se ele não foi usado de novo nesse meio-tempo."""
-        if self.plays.get(player) == play_number:
-            player.set_state(self.Gst.State.PAUSED)
-        return False
+        """Começa o clique no próximo pedaço de áudio."""
+        with self.lock:
+            self.offset = 0
 
     def close(self):
         """Libera o áudio ao fechar o hub."""
-        for player in self.players:
-            player.set_state(self.Gst.State.NULL)
+        self.pipeline.set_state(self.Gst.State.NULL)
 
 
 class _WindowsPlayer:

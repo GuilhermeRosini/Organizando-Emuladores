@@ -197,7 +197,7 @@ class MyGamesApp:
             button = Gtk.Button(label=TAB_NAMES.get(key, key))
             button.add_css_class("tab")
             button.set_focusable(False)
-            button.connect("clicked", lambda _b, k=key: self.switch_tab(k))
+            button.connect("clicked", lambda _b, k=key: (self.sound.click(), self.switch_tab(k)))
             tabs.append(button)
             self.tab_buttons[key] = button
         bar.set_center_widget(tabs)
@@ -481,6 +481,7 @@ class MyGamesApp:
     # ---- Abas ----------------------------------------------------------------
     def cycle_tab(self, step):
         """Vai para a aba anterior/seguinte (Q/E, LB/RB)."""
+        self.sound.click()
         self.switch_tab(TABS[(TABS.index(self.tab) + step) % len(TABS)])
 
     def switch_tab(self, key):
@@ -650,6 +651,7 @@ class MyGamesApp:
     def _on_shelf_activate(self, item):
         """Clicou/confirmou uma caixa: abre o console, o jogo, o emulador, a pasta ou as configurações."""
         kind, value = item.payload
+        self.sound.click()
         if kind == "console":
             self.switch_tab(value.id)
         elif kind == "game":
@@ -672,6 +674,7 @@ class MyGamesApp:
             self._close_search()
             self._apply_search()
         elif self.tab != "home":
+            self.sound.click()
             self.switch_tab("home")
 
     def show_settings(self, console_id=None):

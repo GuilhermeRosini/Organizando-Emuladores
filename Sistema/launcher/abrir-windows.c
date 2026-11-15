@@ -1,5 +1,5 @@
 /*
- * "Abrir My Games.exe" — o arquivo para clicar no Windows (fica na raiz do hub).
+ * "Abrir My Games (Windows).exe" — o arquivo para clicar no Windows (fica na raiz do hub).
  *
  * Descobre a própria pasta e abre o hub com o Python que vem dentro dela
  * (Sistema\windows\runtime\bin\pythonw.exe), sem janela de terminal.
