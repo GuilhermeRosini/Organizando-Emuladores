@@ -1,7 +1,0 @@
-{
-  "ps2": "ps2/emulador",
-  "super-nintendo": "super nintendo/emulador",
-  "gameboy-advance": "gameboy advance/emulador",
-  "gamecube": "gamecube/emulador",
-  "nintendo-64": "nintendo 64/emulador"
-}

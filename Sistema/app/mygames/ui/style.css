@@ -1,0 +1,209 @@
+/* My Games — tema roxo do hub */
+@define-color accent #c4a1ff;
+@define-color accent_strong #e3d2ff;
+@define-color accent_deep #7c3aed;
+@define-color ink #f7f3ff;
+@define-color ink_dim rgba(247, 243, 255, 0.68);
+@define-color ink_faint rgba(247, 243, 255, 0.42);
+@define-color surface rgba(255, 255, 255, 0.055);
+@define-color surface_hover rgba(255, 255, 255, 0.10);
+@define-color stroke rgba(255, 255, 255, 0.12);
+@define-color ok #6ee7b7;
+@define-color warn #fcd34d;
+@define-color danger #fda4af;
+
+window.mygames {
+  background-color: #170a2b;
+  background-image:
+    radial-gradient(ellipse at 50% 42%, rgba(150, 82, 240, 0.55) 0%, rgba(150, 82, 240, 0) 58%),
+    linear-gradient(140deg, #1c0b35 0%, #3b1670 48%, #170929 100%);
+  color: @ink;
+}
+window.mygames.settings {
+  background-image: linear-gradient(160deg, #1f0c3a 0%, #2f1257 100%);
+}
+label { color: @ink; }
+
+/* ---- Barra de título ---- */
+headerbar {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  min-height: 52px;
+  padding: 0 8px;
+}
+headerbar windowcontrols button {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 4px;
+}
+headerbar windowcontrols button:hover { background-color: rgba(255, 255, 255, 0.14); }
+.app-title { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; }
+.app-subtitle { color: @ink_faint; font-size: 12px; letter-spacing: 1.5px; }
+
+/* ---- Botões ---- */
+button {
+  color: @ink;
+  background-color: @surface;
+  background-image: none;
+  border: 1px solid @stroke;
+  border-radius: 12px;
+  padding: 8px 14px;
+  box-shadow: none;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+button:hover { background-color: @surface_hover; border-color: rgba(255, 255, 255, 0.32); }
+button:active { background-color: rgba(255, 255, 255, 0.16); }
+button:disabled { opacity: 0.45; }
+button.primary {
+  background-image: linear-gradient(135deg, #9b5cff, #6d28d9);
+  border-color: rgba(255, 255, 255, 0.25);
+  font-weight: 700;
+}
+button.primary:hover { background-image: linear-gradient(135deg, #ad78ff, #7c3aed); }
+button.flat-icon, button.circular {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 4px;
+}
+button.flat-icon:hover, button.circular:hover {
+  background-color: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 10px rgba(196, 161, 255, 0.45);
+}
+
+/* ---- Carrossel ---- */
+.carousel, .carousel viewport { background: transparent; border: none; box-shadow: none; }
+.console-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  min-width: 270px;
+  min-height: 340px;
+  padding: 10px;
+  opacity: 0.55;
+  filter: saturate(0.55) brightness(0.8);
+  transform: scale(0.9);
+  transition: opacity 220ms ease, filter 220ms ease, transform 220ms ease;
+}
+.console-card:hover { background: transparent; opacity: 0.8; filter: saturate(0.85) brightness(0.95); transform: scale(0.95); }
+.console-card.selected {
+  opacity: 1;
+  filter: none;
+  transform: scale(1.06);
+  background-image: radial-gradient(ellipse closest-side at 50% 72%, rgba(196, 161, 255, 0.38) 0%, rgba(196, 161, 255, 0) 100%);
+}
+.console-card.selected:hover { transform: scale(1.1); }
+.console-outline { transition: opacity 220ms ease; }
+
+/* ---- Painel do console selecionado (tela inicial) ---- */
+.hero-title { font-size: 34px; font-weight: 800; letter-spacing: 0.5px; }
+.hero-meta { color: @ink_faint; font-size: 13px; letter-spacing: 1px; }
+.chip {
+  background-color: rgba(255, 255, 255, 0.07);
+  border: 1px solid @stroke;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.chip.ok { color: @ok; border-color: alpha(@ok, 0.4); background-color: alpha(@ok, 0.08); }
+.chip.warn { color: @warn; border-color: alpha(@warn, 0.4); background-color: alpha(@warn, 0.08); }
+.chip.danger { color: @danger; border-color: alpha(@danger, 0.4); background-color: alpha(@danger, 0.08); }
+.hint { color: @ink_faint; font-size: 12px; }
+.key {
+  color: @ink_dim;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* ---- Biblioteca ---- */
+.library-art { opacity: 0.95; }
+.library-title { font-size: 30px; font-weight: 800; }
+.library-sub { color: @ink_dim; font-size: 14px; }
+.panel {
+  background-color: rgba(18, 6, 36, 0.45);
+  border: 1px solid @stroke;
+  border-radius: 22px;
+  padding: 18px;
+}
+entry, searchentry {
+  color: @ink;
+  background-color: rgba(255, 255, 255, 0.07);
+  border: 1px solid @stroke;
+  border-radius: 12px;
+  min-height: 40px;
+  box-shadow: none;
+}
+searchentry:focus-within, entry:focus-within { border-color: @accent; box-shadow: 0 0 0 2px alpha(@accent, 0.25); }
+scrolledwindow, viewport, list, row { background: transparent; border: none; box-shadow: none; }
+list.games row.game {
+  border-radius: 14px;
+  padding: 10px 12px;
+  margin: 2px 0;
+  border: 1px solid transparent;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+list.games row.game:hover { background-color: @surface_hover; }
+list.games row.game:selected, list.games row.game:focus {
+  background-color: alpha(@accent, 0.16);
+  border-color: alpha(@accent, 0.55);
+  outline: none;
+}
+.badge {
+  background-image: linear-gradient(135deg, rgba(155, 92, 255, 0.55), rgba(109, 40, 217, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  min-width: 52px;
+  min-height: 40px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+.game-title { font-size: 16px; font-weight: 700; }
+.game-meta { color: @ink_faint; font-size: 12px; }
+.play-icon { color: @accent; opacity: 0; transition: opacity 150ms ease; }
+row.game:hover .play-icon, row.game:selected .play-icon { opacity: 1; }
+.empty-title { font-size: 18px; font-weight: 700; }
+.empty-text { color: @ink_dim; }
+
+/* ---- Aviso flutuante ---- */
+.toast {
+  background-color: rgba(20, 8, 40, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  padding: 10px 20px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.toast.error { border-color: alpha(@danger, 0.6); }
+.toast.error label { color: @danger; }
+
+/* ---- Configurações ---- */
+.section-title { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: @ink_faint; }
+.card {
+  background-color: @surface;
+  border: 1px solid @stroke;
+  border-radius: 18px;
+  padding: 16px 18px;
+}
+.card-title { font-size: 17px; font-weight: 800; }
+.field-label { color: @ink_faint; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+.path { color: @ink_dim; font-size: 13px; }
+.note { color: @ink_faint; font-size: 12px; }
+.mini-thumb { opacity: 0.95; }
+progressbar trough { background-color: rgba(255, 255, 255, 0.1); border-radius: 99px; min-height: 6px; }
+progressbar progress { background-image: linear-gradient(90deg, #9b5cff, #e3d2ff); border-radius: 99px; min-height: 6px; }
+switch { background-color: rgba(255, 255, 255, 0.15); border: none; }
+switch:checked { background-color: #8b5cf6; }
+switch slider { background-color: #ffffff; }

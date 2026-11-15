@@ -1,0 +1,18 @@
+# Configuração pessoal e registros
+Sistema/config.json
+Sistema/logs/
+__pycache__/
+
+# Emuladores baixados, dados/saves e BIOS (não vão para o git)
+Emuladores/**/*.AppImage
+Emuladores/**/*.appimage
+Emuladores/**/*.part
+Emuladores/*/dados/
+Emuladores/*/cores/
+Emuladores/*/autoconfig/
+Emuladores/*/bios/*
+!Emuladores/*/bios/.gitkeep
+
+# Jogos
+Emuladores/*/Adicionar Jogos/*
+!Emuladores/*/Adicionar Jogos/.gitkeep
