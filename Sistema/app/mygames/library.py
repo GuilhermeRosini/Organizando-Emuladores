@@ -1,5 +1,6 @@
 """Busca de jogos nas pastas de cada console."""
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from .config import Config
 
 @dataclass(frozen=True)
 class Game:
+    """Um jogo encontrado: arquivo, nome bonito, pasta onde está e tamanho."""
     path: Path
     title: str
     location: str
@@ -15,17 +17,20 @@ class Game:
 
     @property
     def kind(self):
+        """Tipo do arquivo em maiúsculas, ex.: "ISO", "ZIP"."""
         return self.path.suffix.lstrip(".").upper()[:4] or "?"
 
 
 @dataclass
 class ScanResult:
+    """Resultado da busca: jogos, pastas lidas e pastas que não foram encontradas."""
     games: list
     folders: list
     missing: list
 
 
 def pretty_size(size):
+    """Tamanho legível em português (ex.: "3,5 GB")."""
     value = float(size)
     for unit in ("B", "KB", "MB", "GB"):
         if value < 1024 or unit == "GB":
@@ -35,9 +40,13 @@ def pretty_size(size):
 
 
 def pretty_title(path, titles=None):
+    """Nome para mostrar: tira "(USA)", "[!]", código do disco e sublinhados."""
     if titles and path.stem.casefold() in titles:
         return titles[path.stem.casefold()]
-    return path.stem.replace("_", " ").strip() or path.name
+    title = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", path.stem)  # tira "(USA)", "[!]"...
+    title = re.sub(r"^[A-Z]{4}[_-]?\d{3}\.?\d{2}[.\s_-]*", "", title)  # código do disco (SLUS_212.69.)
+    title = re.sub(r"\s+", " ", title.replace("_", " ")).strip(" .-")
+    return title or path.stem or path.name
 
 
 def game_folders_for(console, config):
@@ -50,6 +59,7 @@ def game_folders_for(console, config):
 
 
 def scan_console(console, config=None):
+    """Procura os jogos do console em Adicionar Jogos e nas pastas extras, sem repetir."""
     config = config or Config()
     games = {}
     folders = []

@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 from .consoles import CONSOLES
-from .paths import CONFIG_FILE, ROOT, resolve_stored, store_path
+from .paths import CONFIG_FILE, ROOT, from_other_system, resolve_stored, store_path
 
 DEFAULTS = {"tela_cheia": True, "consoles": {}}
 LEGACY_EMULATORS = ROOT / "emulators.json"
@@ -13,10 +13,13 @@ LEGACY_GAMES = ROOT / "games.json"
 
 
 class ConfigError(Exception):
+    """Erro ao ler ou gravar o config.json (mostrado ao usuário como aviso)."""
     pass
 
 
 def _write_atomic(path, data):
+    """Grava o JSON num arquivo temporário e troca de uma vez, para nunca deixar o config.json pela metade.
+    """
     # Grava num temporário e troca, para nunca deixar o arquivo pela metade.
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-", suffix=".tmp")
     try:
@@ -57,11 +60,17 @@ def _migrate_legacy():
 
 
 class Config:
+    """Preferências do hub guardadas em Sistema/config.json (tela cheia, emulador e pastas de jogos de cada
+    console).
+    """
+
     def __init__(self):
+        """Começa com os valores padrão e lê o config.json, se existir."""
         self.data = json.loads(json.dumps(DEFAULTS))
         self.load()
 
     def load(self):
+        """Lê o config.json (ou migra os arquivos da versão 1) e completa o que estiver faltando."""
         if not CONFIG_FILE.exists():
             if LEGACY_EMULATORS.exists() or LEGACY_GAMES.exists():
                 self.data = _migrate_legacy()
@@ -79,6 +88,7 @@ class Config:
         self.data = data
 
     def save(self):
+        """Salva as preferências no config.json."""
         try:
             _write_atomic(CONFIG_FILE, self.data)
         except OSError as error:
@@ -87,15 +97,29 @@ class Config:
     # ---- Preferências gerais -------------------------------------------------
     @property
     def fullscreen(self):
+        """Se os emuladores devem abrir em tela cheia."""
         return bool(self.data.get("tela_cheia", True))
 
     @fullscreen.setter
     def fullscreen(self, value):
+        """Liga/desliga a tela cheia dos emuladores e salva."""
         self.data["tela_cheia"] = bool(value)
+        self.save()
+
+    @property
+    def click_sound(self):
+        """Se toca o som de clique ao passar pelas caixas."""
+        return bool(self.data.get("som_navegacao", True))
+
+    @click_sound.setter
+    def click_sound(self, value):
+        """Liga/desliga o som de clique e salva."""
+        self.data["som_navegacao"] = bool(value)
         self.save()
 
     # ---- Por console ---------------------------------------------------------
     def _entry(self, console_id, create=False):
+        """Configuração de um console no config.json (create=True cria a entrada se não existir)."""
         consoles = self.data["consoles"]
         if create:
             return consoles.setdefault(console_id, {})
@@ -110,6 +134,7 @@ class Config:
         return resolve_stored(value)
 
     def set_emulator(self, console_id, path):
+        """Define o emulador escolhido para o console (None volta para a detecção automática)."""
         entry = self._entry(console_id, create=True)
         if path is None:
             entry.pop("emulador", None)
@@ -120,18 +145,23 @@ class Config:
         self.save()
 
     def custom_arguments(self, console_id):
+        """Argumentos personalizados do emulador do console, se o usuário definiu algum no config.json."""
         arguments = self._entry(console_id).get("argumentos")
         if isinstance(arguments, list) and all(isinstance(a, str) for a in arguments):
             return arguments
         return None
 
     def game_folders(self, console_id):
+        """Pastas de jogos extras escolhidas pelo usuário para o console."""
         values = self._entry(console_id).get("pastas_jogos") or []
         if not isinstance(values, list):
             return []
+        # Pastas escolhidas no outro sistema (Linux/Windows) não valem aqui.
+        values = [value for value in values if not from_other_system(value)]
         return [path for path in (resolve_stored(value) for value in values) if path]
 
     def add_game_folder(self, console_id, path):
+        """Adiciona uma pasta de jogos extra ao console e salva."""
         entry = self._entry(console_id, create=True)
         folders = entry.setdefault("pastas_jogos", [])
         resolved = Path(path).resolve()
@@ -140,6 +170,7 @@ class Config:
             self.save()
 
     def remove_game_folder(self, console_id, path):
+        """Remove uma pasta de jogos extra do console e salva."""
         entry = self._entry(console_id, create=True)
         target = Path(path)
         entry["pastas_jogos"] = [

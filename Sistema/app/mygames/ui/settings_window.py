@@ -8,12 +8,15 @@ from ..config import ConfigError
 from ..consoles import CONSOLE_LIST
 from ..desktop import install_menu_shortcut
 from ..emulators import has_libfuse2
-from ..paths import ROOT, display_path
+from ..paths import IS_WINDOWS, ROOT, display_path
 from .widgets import icon_button, open_folder, run_in_thread
 
 
 class SettingsWindow(Gtk.Window):
+    """Janela de Configurações: tela cheia, atalho no menu e emulador/pastas de cada console."""
+
     def __init__(self, app, focus_console=None):
+        """Monta a janela com o cartão geral e um cartão por console."""
         super().__init__(application=app.application, title="Configurações")
         self.app = app
         self.cards = {}
@@ -55,6 +58,7 @@ class SettingsWindow(Gtk.Window):
             GLib.timeout_add(200, self._scroll_to, focus_console)
 
     def _scroll_to(self, console_id):
+        """Rola até o cartão de um console."""
         ok, point = self.cards[console_id].compute_point(self.scroller.get_child(), _point(0, 0))
         if ok:
             self.scroller.get_vadjustment().set_value(point.y - 10)
@@ -62,6 +66,7 @@ class SettingsWindow(Gtk.Window):
 
     @staticmethod
     def _section(text):
+        """Título de uma seção da janela."""
         label = Gtk.Label(label=text, xalign=0)
         label.add_css_class("section-title")
         label.set_margin_top(10)
@@ -69,6 +74,7 @@ class SettingsWindow(Gtk.Window):
 
     # ---- Geral ---------------------------------------------------------------
     def _general_card(self):
+        """Cartão geral: tela cheia nos emuladores, som de clique, atalho no menu e pasta do hub."""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         card.add_css_class("card")
 
@@ -83,6 +89,16 @@ class SettingsWindow(Gtk.Window):
         card.append(row)
 
         row = Gtk.Box(spacing=12)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        texts.append(_label("Som de clique ao navegar", "card-title"))
+        texts.append(_label("Toca um clique a cada jogo ou console que passa.", "note"))
+        row.append(texts)
+        sound = Gtk.Switch(active=self.app.config.click_sound, valign=Gtk.Align.CENTER)
+        sound.connect("notify::active", self._on_click_sound)
+        row.append(sound)
+        card.append(row)
+
+        row = Gtk.Box(spacing=12, visible=not IS_WINDOWS)  # atalho do menu: só no Linux
         texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
         texts.append(_label("Atalho no menu de aplicativos", "card-title"))
         texts.append(_label("Cria o ícone do My Games neste computador apontando para esta pasta.", "note"))
@@ -104,7 +120,7 @@ class SettingsWindow(Gtk.Window):
         row.append(open_button)
         card.append(row)
 
-        if not has_libfuse2():
+        if not IS_WINDOWS and not has_libfuse2():
             card.append(_label(
                 "Aviso: a biblioteca libfuse2 não está instalada. O AppImage do mGBA "
                 "vai abrir em modo de extração, que é um pouco mais lento. "
@@ -116,12 +132,24 @@ class SettingsWindow(Gtk.Window):
         return card
 
     def _on_fullscreen(self, switch, _param):
+        """Liga/desliga a tela cheia dos emuladores."""
         try:
             self.app.config.fullscreen = switch.get_active()
         except ConfigError as error:
             self.general_status.set_text(str(error))
 
+    def _on_click_sound(self, switch, _param):
+        """Liga/desliga o som de clique da prateleira."""
+        self.app.sound.enabled = switch.get_active()
+        if switch.get_active():
+            self.app.sound.click()  # amostra do som ao ligar
+        try:
+            self.app.config.click_sound = switch.get_active()
+        except ConfigError as error:
+            self.general_status.set_text(str(error))
+
     def _on_shortcut(self, _button):
+        """Cria o atalho do My Games no menu de aplicativos."""
         try:
             path = install_menu_shortcut()
             self.general_status.set_text(f"Atalho criado em {display_path(path)}.")
@@ -130,12 +158,14 @@ class SettingsWindow(Gtk.Window):
 
     # ---- Cartão de cada console ---------------------------------------------
     def _rebuild(self, console, message=""):
+        """Refaz o cartão de um console (depois de mudar algo nele)."""
         holder = self.cards[console.id]
         while (child := holder.get_first_child()) is not None:
             holder.remove(child)
         holder.append(self._console_card(console, message))
 
     def _console_card(self, console, message):
+        """Cartão de um console: emulador (baixar, escolher, automático), BIOS e pastas de jogos."""
         state = self.app.emulator_state(console)
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         card.add_css_class("card")
@@ -164,7 +194,9 @@ class SettingsWindow(Gtk.Window):
             origin = "detectado automaticamente" if emulator.automatic else "escolhido manualmente"
             text = f"{emulator.name} — {emulator.description} ({origin})"
         else:
-            text = f"Nenhum emulador. Baixe o {console.download.emulator} ou coloque um AppImage em Emuladores/{console.folder}."
+            where = f"Emuladores/{console.folder}/Windows" if IS_WINDOWS else f"Emuladores/{console.folder}"
+            kind = "o .exe" if IS_WINDOWS else "um AppImage"
+            text = f"Nenhum emulador. Baixe o {console.download.emulator} ou coloque {kind} em {where}."
         path = _label(text, "path", wrap=True)
         card.append(path)
 
@@ -175,7 +207,7 @@ class SettingsWindow(Gtk.Window):
             download.add_css_class("primary")
         download.set_sensitive(console.id not in self.downloading)
         download.connect("clicked", self._on_download, console)
-        if console.download.repo:
+        if console.download.windows if IS_WINDOWS else console.download.repo:
             buttons.append(download)
         choose = Gtk.Button(label="Escolher arquivo…")
         choose.connect("clicked", self._on_choose_emulator, console)
@@ -217,6 +249,7 @@ class SettingsWindow(Gtk.Window):
         return card
 
     def _folder_row(self, console, folder, removable):
+        """Linha de uma pasta de jogos, com botões de abrir e remover."""
         row = Gtk.Box(spacing=8)
         exists = Path(folder).is_dir()
         suffix = " (pasta padrão)" if not removable else ("" if exists else " — não encontrada")
@@ -232,14 +265,17 @@ class SettingsWindow(Gtk.Window):
 
     # ---- Ações ---------------------------------------------------------------
     def _changed(self, console, message):
+        """Algo mudou num console: refaz o cartão e avisa a janela principal."""
         self._rebuild(console, message)
         self.app.refresh_console(console)
 
     def _on_choose_emulator(self, _button, console):
+        """Escolher manualmente o arquivo do emulador."""
         dialog = Gtk.FileDialog(title=f"Escolha o emulador de {console.name}")
         dialog.set_initial_folder(_gfile(console.emulator_dir))
 
         def chosen(dialog, result):
+            """Arquivo escolhido: salva como emulador do console."""
             try:
                 file = dialog.open_finish(result)
             except GLib.Error:
@@ -254,6 +290,7 @@ class SettingsWindow(Gtk.Window):
         dialog.open(self, None, chosen)
 
     def _on_clear_emulator(self, _button, console):
+        """Volta a detectar o emulador automaticamente."""
         try:
             self.app.config.set_emulator(console.id, None)
             self._changed(console, "Voltando a usar o emulador da pasta Emuladores/.")
@@ -261,9 +298,11 @@ class SettingsWindow(Gtk.Window):
             self._changed(console, str(error))
 
     def _on_add_folder(self, _button, console):
+        """Escolher uma pasta de jogos extra."""
         dialog = Gtk.FileDialog(title=f"Pasta com jogos de {console.name}")
 
         def chosen(dialog, result):
+            """Pasta escolhida: adiciona ao console."""
             try:
                 folder = dialog.select_folder_finish(result)
             except GLib.Error:
@@ -277,6 +316,7 @@ class SettingsWindow(Gtk.Window):
         dialog.select_folder(self, None, chosen)
 
     def _remove_folder(self, console, folder):
+        """Remove uma pasta de jogos extra."""
         try:
             self.app.config.remove_game_folder(console.id, folder)
             self._changed(console, "Pasta removida da lista. Os arquivos não foram apagados.")
@@ -284,12 +324,15 @@ class SettingsWindow(Gtk.Window):
             self._changed(console, str(error))
 
     def _on_download(self, _button, console):
+        """Baixa a versão mais recente do emulador recomendado, mostrando o progresso."""
         self.downloading.add(console.id)
         self._rebuild(console, f"Procurando a versão mais recente do {console.download.emulator}…")
         card = self.cards[console.id].get_first_child()
 
         def progress(fraction, text):
+            """Chamado pela thread do download: atualiza a barra de progresso."""
             def update():
+                """De volta à interface: mostra o progresso."""
                 current = self.cards[console.id].get_first_child()
                 current.progress.set_visible(True)
                 current.progress.set_fraction(fraction)
@@ -300,6 +343,7 @@ class SettingsWindow(Gtk.Window):
             GLib.idle_add(update)
 
         def done(path, error):
+            """Download terminou: avisa e atualiza o cartão."""
             self.downloading.discard(console.id)
             if error:
                 message = f"Falha ao baixar: {error}"
@@ -312,6 +356,7 @@ class SettingsWindow(Gtk.Window):
 
 
 def _label(text, css=None, wrap=False, hexpand=False):
+    """Atalho para criar um texto com estilo."""
     label = Gtk.Label(label=text, xalign=0, wrap=wrap, hexpand=hexpand)
     if wrap:
         label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
@@ -321,6 +366,7 @@ def _label(text, css=None, wrap=False, hexpand=False):
 
 
 def _gfile(path):
+    """Converte um caminho em arquivo do GIO (para os diálogos de escolha)."""
     from gi.repository import Gio
 
     Path(path).mkdir(parents=True, exist_ok=True)
@@ -328,6 +374,7 @@ def _gfile(path):
 
 
 def _point(x, y):
+    """Atalho para criar um ponto (x, y)."""
     from gi.repository import Graphene
 
     point = Graphene.Point()

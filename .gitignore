@@ -1,6 +1,11 @@
 # Configuração pessoal e registros
 Sistema/config.json
 Sistema/logs/
+Sistema/capas/
+# Runtime do Windows (Python + GTK, ~125 MB): recriado com python3 Sistema/windows/montar-runtime.py
+Sistema/windows/runtime/
+Sistema/windows/7zr.exe
+Sistema/launcher/*.res
 __pycache__/
 
 # Emuladores baixados, dados/saves e BIOS (não vão para o git)
@@ -10,6 +15,8 @@ Emuladores/**/*.part
 Emuladores/*/dados/
 Emuladores/*/cores/
 Emuladores/*/autoconfig/
+# Emuladores para Windows (baixados pelo Menu ou: python3 Sistema/app/main.py --baixar-windows todos)
+Emuladores/*/Windows/
 Emuladores/*/bios/*
 !Emuladores/*/bios/.gitkeep
 

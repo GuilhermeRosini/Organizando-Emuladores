@@ -12,4 +12,11 @@ if ! "$PYTHON" -c 'import gi; gi.require_version("Gtk", "4.0")' 2>/dev/null; the
   command -v zenity >/dev/null && zenity --error --text="$MSG" 2>/dev/null || echo "$MSG" >&2
   exit 1
 fi
+# Ao abrir pelo gerenciador de arquivos não há terminal: as mensagens vão para
+# Sistema/logs/hub.log, para dar para descobrir o motivo se algo der errado.
+# (Num terminal as mensagens continuam aparecendo na tela.)
+LOG="$APP_DIR/logs/hub.log"
+if [ ! -t 2 ] && mkdir -p "$APP_DIR/logs" 2>/dev/null && : >"$LOG" 2>/dev/null; then
+  exec "$PYTHON" "$APP_DIR/app/main.py" "$@" >>"$LOG" 2>&1
+fi
 exec "$PYTHON" "$APP_DIR/app/main.py" "$@"

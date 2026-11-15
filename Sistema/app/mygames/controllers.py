@@ -34,6 +34,7 @@ ABS_MISC = 0x28
 
 @dataclass
 class Gamepad:
+    """Um controle conectado: nome, botões/eixos que ele tem e onde fica cada botão físico."""
     name: str
     js: str
     keys: list
@@ -44,21 +45,26 @@ class Gamepad:
 
     # ---- Ordem usada pelo SDL2 no Linux (Snes9x, mGBA) ----------------------
     def sdl_button(self, code):
+        """Número do botão como o SDL2 enxerga no Linux (usado pelo Snes9x e mGBA)."""
         order = [c for c in self.keys if c >= BTN_JOYSTICK] + [c for c in self.keys if c < BTN_JOYSTICK]
         return order.index(code)
 
     def sdl_axis(self, code):
+        """Número do eixo analógico como o SDL2 enxerga no Linux."""
         return [c for c in self.axes if c not in HAT_CODES].index(code)
 
     @property
     def sdl_axis_count(self):
+        """Quantos eixos analógicos reais o controle tem (sem contar o direcional)."""
         return len([c for c in self.axes if c not in HAT_CODES])
 
     # ---- Ordem usada pelo backend evdev do Dolphin --------------------------
     def evdev_button(self, code):
+        """Número do botão como o backend evdev do Dolphin enxerga."""
         return self.keys.index(code)
 
     def evdev_axis(self, code):
+        """Número do eixo como o backend evdev do Dolphin enxerga."""
         return [c for c in self.axes if c < ABS_MISC].index(code)
 
 
@@ -81,6 +87,7 @@ def _bitmap(path):
 
 
 def _read(path):
+    """Lê um arquivo de texto do sistema (sysfs); devolve "" se não existir."""
     try:
         return Path(path).read_text().strip()
     except OSError:
@@ -218,6 +225,7 @@ def configure_pcsx2(ini):
 # Snes9x — SDL2 joystick cru, recalculado a cada abertura
 # ---------------------------------------------------------------------------
 def _snes9x_binding(pad, entry):
+    """Converte um botão/eixo do controle no texto que o Snes9x usa no snes9x.conf."""
     if entry is None:
         return "Unset"
     kind = entry[0]
@@ -233,6 +241,7 @@ def _snes9x_binding(pad, entry):
 
 
 def configure_snes9x(conf, pad):
+    """Escreve o mapeamento do controle no Snes9x (botões na mesma posição do controle do SNES)."""
     layout = dict(pad.layout)
     for direction in ("up", "down", "left", "right"):
         if direction in layout and layout[direction][0] == "h":
@@ -261,10 +270,12 @@ def configure_snes9x_keyboard(conf):
 # mGBA — SDL2 joystick cru, recalculado a cada abertura
 # ---------------------------------------------------------------------------
 def configure_mgba(config_ini, pad):
+    """Escreve o mapeamento do controle no mGBA (botões na mesma posição do Game Boy Advance)."""
     layout = pad.layout
     values = {}
 
     def button(name):
+        """Número SDL do botão físico pedido, ou -1 se o controle não tiver."""
         entry = layout.get(name)
         return pad.sdl_button(entry[1]) if entry and entry[0] == "b" else -1
 
@@ -287,6 +298,7 @@ def configure_mgba(config_ini, pad):
 # Dolphin — backend evdev, recalculado a cada abertura
 # ---------------------------------------------------------------------------
 def _dolphin_input(pad, entry):
+    """Converte um botão/eixo do controle no texto que o Dolphin usa (ex.: `Button 3`)."""
     if entry is None:
         return ""
     if entry[0] == "b":
@@ -295,6 +307,7 @@ def _dolphin_input(pad, entry):
 
 
 def configure_dolphin(config_dir, pad):
+    """Escreve o mapeamento do controle no Dolphin (controle de GameCube na porta 1)."""
     layout = pad.layout
     get = lambda name: _dolphin_input(pad, layout.get(name))
     stick = lambda code, sign: f"`Axis {pad.evdev_axis(code)}{sign}`" if code is not None else ""
@@ -321,8 +334,37 @@ def configure_dolphin(config_dir, pad):
 def restore_dolphin_keyboard(config_dir):
     """Sem controle: deixa o Dolphin com o teclado padrão dele."""
     pad_ini = config_dir / "GCPadNew.ini"
-    if pad_ini.exists() and "Device = evdev/" in pad_ini.read_text(encoding="utf-8", errors="replace"):
+    if not pad_ini.exists():
+        return
+    text = pad_ini.read_text(encoding="utf-8", errors="replace")
+    # Remove só o que o hub escreveu (Linux: evdev; Windows: XInput), nunca um ajuste manual.
+    if "Device = evdev/" in text or "Device = XInput/" in text:
         pad_ini.unlink()
+
+
+def configure_dolphin_xinput(config_dir):
+    """Windows: liga o controle 1 do GameCube ao controle XInput 1 (Xbox e compatíveis).
+
+    Os nomes ("Button A", "Left X+"...) são os que o próprio Dolphin usa para XInput.
+    Sem controle conectado o Dolphin simplesmente não recebe nada dele; o teclado
+    continua disponível pelo menu do Dolphin.
+    """
+    values = [
+        ("Device", "XInput/0/Gamepad"),
+        ("Buttons/A", "`Button A`"), ("Buttons/B", "`Button B`"), ("Buttons/X", "`Button X`"),
+        ("Buttons/Y", "`Button Y`"), ("Buttons/Z", "`Shoulder R`"), ("Buttons/Start", "`Start`"),
+        ("Main Stick/Up", "`Left Y+`"), ("Main Stick/Down", "`Left Y-`"),
+        ("Main Stick/Left", "`Left X-`"), ("Main Stick/Right", "`Left X+`"),
+        ("Main Stick/Calibration", "100.00 141.42 100.00 141.42 100.00 141.42 100.00 141.42"),
+        ("C-Stick/Up", "`Right Y+`"), ("C-Stick/Down", "`Right Y-`"),
+        ("C-Stick/Left", "`Right X-`"), ("C-Stick/Right", "`Right X+`"),
+        ("C-Stick/Calibration", "100.00 141.42 100.00 141.42 100.00 141.42 100.00 141.42"),
+        ("Triggers/L", "`Trigger L`"), ("Triggers/R", "`Trigger R`"),
+        ("Triggers/L-Analog", "`Trigger L`"), ("Triggers/R-Analog", "`Trigger R`"),
+        ("D-Pad/Up", "`Pad N`"), ("D-Pad/Down", "`Pad S`"), ("D-Pad/Left", "`Pad W`"), ("D-Pad/Right", "`Pad E`"),
+        ("Rumble/Motor", "`Motor L | Motor R`"),
+    ]
+    _set_ini_section(config_dir / "GCPadNew.ini", "GCPad1", values)
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +384,7 @@ RMG_MAPPING = [
 
 
 def configure_rmg(cfg):
+    """Liga o controle 1 do N64 no RMG em modo automático (só na primeira vez)."""
     section = "Rosalie's Mupen GUI - Input Plugin Profile 0"
     if cfg.exists() and f"[{section}]" in cfg.read_text(encoding="utf-8", errors="replace"):
         return

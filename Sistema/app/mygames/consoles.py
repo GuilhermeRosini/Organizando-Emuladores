@@ -5,17 +5,35 @@ from .paths import ASSETS_DIR, EMULATORS_DIR, GAMES_FOLDER_NAME
 
 
 @dataclass(frozen=True)
+class WindowsDownload:
+    """Onde baixar a versão para Windows do emulador recomendado.
+
+    source: "github" (repo + asset_pattern), "dolphin" (site oficial do Dolphin)
+    ou "retroarch" (buildbot do libretro, mais os núcleos em cores).
+    """
+
+    source: str
+    repo: str = ""
+    asset_pattern: str = ""
+    cores: tuple = ()
+    # Pastas do pacote que o hub não usa (economizam espaço no pendrive).
+    skip: tuple = ()
+
+
+@dataclass(frozen=True)
 class Download:
-    """Onde baixar a versão oficial mais recente do emulador recomendado."""
+    """Onde baixar a versão oficial mais recente do emulador recomendado (Linux e Windows)."""
 
     emulator: str
     repo: str
     asset_pattern: str
     note: str = ""
+    windows: WindowsDownload = None
 
 
 @dataclass(frozen=True)
 class Console:
+    """Tudo sobre um console: nome, pasta, extensões dos jogos, emulador recomendado e BIOS."""
     id: str
     name: str
     short: str
@@ -32,14 +50,17 @@ class Console:
 
     @property
     def art(self):
+        """Foto do console usada na aba Início."""
         return ASSETS_DIR / "consoles" / self.id / "console.png"
 
     @property
     def outline(self):
+        """Contorno branco brilhante desenhado em volta do console selecionado na aba Início."""
         return ASSETS_DIR / "consoles" / self.id / "console-outline.png"
 
     @property
     def emulator_dir(self):
+        """Pasta do console dentro de Emuladores/ (emulador, BIOS, jogos e dados)."""
         return EMULATORS_DIR / self.folder
 
     @property
@@ -54,6 +75,7 @@ class Console:
 
 
 def _ext(*items):
+    """Monta o conjunto de extensões de arquivo ("iso" -> ".iso")."""
     return frozenset("." + item for item in items)
 
 
@@ -97,6 +119,7 @@ CONSOLE_LIST = [
             repo="pkgforge-dev/PCSX2-AppImage-Enhanced",
             asset_pattern=r"anylinux-x86_64\.AppImage$",
             note="AppImage autossuficiente mantido pela comunidade (pkgforge-dev).",
+            windows=WindowsDownload("github", "PCSX2/pcsx2", r"windows-x64-Qt\.7z$"),
         ),
         bios_note=(
             "O PCSX2 precisa da BIOS do seu PlayStation 2. Coloque o arquivo "
@@ -116,6 +139,7 @@ CONSOLE_LIST = [
             repo="pkgforge-dev/Snes9x-AppImage-Enhanced",
             asset_pattern=r"anylinux-x86_64\.AppImage$",
             note="AppImage autossuficiente mantido pela comunidade (pkgforge-dev).",
+            windows=WindowsDownload("github", "snes9xgit/snes9x", r"win32-x64\.zip$"),
         ),
     ),
     Console(
@@ -130,6 +154,7 @@ CONSOLE_LIST = [
             emulator="mGBA",
             repo="mgba-emu/mgba",
             asset_pattern=r"appimage-x64\.appimage$",
+            windows=WindowsDownload("github", "mgba-emu/mgba", r"win64\.7z$"),
         ),
     ),
     Console(
@@ -145,6 +170,7 @@ CONSOLE_LIST = [
             repo="pkgforge-dev/Dolphin-emu-AppImage",
             asset_pattern=r"anylinux-x86_64\.AppImage$",
             note="AppImage não oficial mantido pela comunidade (pkgforge-dev).",
+            windows=WindowsDownload("dolphin"),
         ),
     ),
     Console(
@@ -159,6 +185,7 @@ CONSOLE_LIST = [
             emulator="RMG",
             repo="Rosalie241/RMG",
             asset_pattern=r"Linux64-.*\.AppImage$",
+            windows=WindowsDownload("github", "Rosalie241/RMG", r"Portable-Windows64-.*\.zip$"),
         ),
     ),
     Console(
@@ -173,6 +200,10 @@ CONSOLE_LIST = [
             emulator="RetroArch",
             repo="",
             asset_pattern="",
+            # Sem temas do menu, bancos de dados, shaders e overlays: o hub usa o menu simples (rgui).
+            windows=WindowsDownload(
+                "retroarch", cores=("geolith", "fbneo"), skip=("assets", "database", "shaders", "overlays")
+            ),
             note=(
                 "RetroArch com os núcleos Geolith (jogos .neo, mesmo dentro de .zip) e FBNeo "
                 "(romsets no padrão MAME, ex.: kof98.zip — esses não podem ser renomeados)."
