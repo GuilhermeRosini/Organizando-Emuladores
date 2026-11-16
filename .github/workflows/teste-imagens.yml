@@ -30,6 +30,7 @@ jobs:
           set GALLIUM_DRIVER=llvmpipe
           Sistema\windows\runtime\bin\python.exe .github\teste\plano.py
           Sistema\windows\runtime\bin\python.exe .github\teste\render.py
+          Sistema\windows\runtime\bin\python.exe .github\teste\prateleira.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
