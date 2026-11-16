@@ -29,6 +29,40 @@ def texture(surface):
     )
 
 
+def is_opaque(surface):
+    """A imagem não tem nenhum pixel transparente? (pode esconder o que está atrás)"""
+    surface.flush()
+    return min(memoryview(surface.get_data())[3::4], default=255) == 255
+
+
+class Strips:
+    """A mesma imagem cortada em faixas verticais, cada uma numa textura.
+
+    A prateleira desenha as faces em perspectiva faixa por faixa (ver
+    shelf._quad); com cada faixa numa textura própria não é preciso recortar
+    nada na hora de desenhar, o que deixa o desenho barato.
+    """
+
+    __slots__ = ("pieces",)
+
+    def __init__(self, surface, count):
+        """Corta em até `count` faixas: [(início, fim, textura)], com início/fim de 0 a 1."""
+        surface.flush()
+        width, height = surface.get_width(), surface.get_height()
+        count = max(1, min(count, width))
+        self.pieces = []
+        for i in range(count):
+            x0, x1 = round(width * i / count), round(width * (i + 1) / count)
+            if x1 <= x0:
+                continue
+            part = cairo.ImageSurface(cairo.FORMAT_ARGB32, x1 - x0, height)
+            cr = cairo.Context(part)
+            cr.set_operator(cairo.OPERATOR_SOURCE)
+            cr.set_source_surface(surface, -x0, 0)
+            cr.paint()
+            self.pieces.append((x0 / width, x1 / width, texture(part)))
+
+
 def _layout(cr, text, font, width=None, align=Pango.Alignment.LEFT, spacing=0):
     """Prepara um texto (fonte, largura, alinhamento, espaçamento) para desenhar."""
     layout = PangoCairo.create_layout(cr)

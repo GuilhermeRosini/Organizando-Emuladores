@@ -1,11 +1,12 @@
 """Prateleira 3D de caixas: a selecionada de frente, as outras mostrando a lombada.
 
 Desempenho:
-- A perspectiva é calculada aqui, em Python, e cada face usa só uma
-  inclinação 2D (skew) mais faixas verticais recortadas da mesma imagem, com
-  bordas em pixels inteiros (sem frestas). Matrizes de projeção 3D saíam
-  rosa/embaralhadas no GTK 4.24 do Windows; transformações 2D funcionam em
-  todos os renderizadores. Faces de frente usam uma faixa só.
+- A perspectiva é calculada aqui, em Python. Cada face usa uma inclinação 2D
+  (skew) e é desenhada em faixas verticais já cortadas (boxart.Strips), com as
+  divisas em pixels inteiros: sem frestas nem degraus visíveis. Matrizes de
+  projeção 3D saíam rosa/embaralhadas no GTK 4.24 do Windows; transformações
+  2D funcionam em todos os renderizadores.
+- Partes de caixas totalmente escondidas atrás da vizinha não são desenhadas.
 - Capas, lombadas e reflexos são preparados em threads, das caixas mais
   próximas para as mais distantes, e só ficam na memória as caixas por perto.
 - O relógio de animação só roda enquanto algo se move.
@@ -27,13 +28,13 @@ HORIZON = 0.42  # ponto de fuga
 VISIBLE = 13  # caixas desenhadas de cada lado
 PRELOAD = 20  # caixas preparadas antes de aparecer
 KEEP = 32  # caixas mantidas na memória de cada lado
-STRIP_ERROR = 1.2  # variação máxima de altura (px) dentro de uma faixa: erro de no máximo ~0,3 px
-MAX_STRIPS = 160
+# Faixas por imagem: o erro da aproximação fica abaixo de ~0,4 px nos ângulos da prateleira.
+FRONT_STRIPS, SPINE_STRIPS, REFLECTION_STRIPS = 48, 4, 12
+PLACEHOLDER_ERROR = 1.2  # face lisa (imagem carregando): uma faixa a cada 1,2 px de variação de altura
 SLOW_FRAME_US = 30_000  # quadros acima disso (≈33 fps) contam como lentos
 FILTER = Gsk.ScalingFilter.LINEAR
 
 EMPTY, QUEUED, READY = 0, 1, 2
-_STATS = []  # DEBUG
 
 
 @dataclass(eq=False)
@@ -49,8 +50,10 @@ class ShelfItem:
     aspect: float = 0.71  # proporção usada até a imagem chegar
     placeholder: object = None  # cor (Gdk.RGBA) mostrada enquanto carrega
     make_glow: object = None  # contorno branco brilhante mostrado quando selecionado
-    glow: object = field(default=None, repr=False)
-    front: object = field(default=None, repr=False)
+    glow: object = field(default=None, repr=False)  # boxart.Strips (as faces da prateleira também)
+    front: object = field(default=None, repr=False)  # textura inteira da capa (tela de abertura do jogo)
+    front_strips: object = field(default=None, repr=False)
+    opaque: bool = field(default=False, repr=False)  # sem transparência: esconde o que está atrás
     front_reflection: object = field(default=None, repr=False)
     spine: object = field(default=None, repr=False)
     spine_reflection: object = field(default=None, repr=False)
@@ -75,15 +78,17 @@ def _prepare(item):
         boxart.add_sheen(surface)
     result = {
         "front": boxart.texture(surface),
-        "front_reflection": boxart.texture(boxart.reflection(surface)),
+        "front_strips": boxart.Strips(surface, FRONT_STRIPS),
+        "front_reflection": boxart.Strips(boxart.reflection(surface), REFLECTION_STRIPS),
         "aspect": surface.get_width() / max(1, surface.get_height()),
     }
     if item.make_glow is not None:
-        result["glow"] = boxart.texture(item.make_glow())
+        result["glow"] = boxart.Strips(item.make_glow(), FRONT_STRIPS)
     if item.boxed:
         spine = item.make_spine()
-        result["spine"] = boxart.texture(spine)
-        result["spine_reflection"] = boxart.texture(boxart.reflection(spine))
+        result["spine"] = boxart.Strips(spine, SPINE_STRIPS)
+        result["spine_reflection"] = boxart.Strips(boxart.reflection(spine), max(1, SPINE_STRIPS // 2))
+        result["opaque"] = boxart.is_opaque(surface) and boxart.is_opaque(spine)
     return result
 
 
@@ -142,6 +147,30 @@ def _lerp_keys(keys, a):
     return keys[0][1:4]
 
 
+def _covered(face, cover):
+    """Trecho de x (na tela) em que `cover` esconde `face` por inteiro, na vertical; ou None.
+
+    As bordas de cima e de baixo das duas faces são retas, então basta comparar
+    nas pontas do trecho em comum. Deixa 1 px de folga de cada lado (bordas
+    suavizadas da face da frente).
+    """
+    left = max(face[2], cover[2]) + 1
+    right = min(face[3], cover[3]) - 1
+    if right <= left:
+        return None
+
+    def edges(f, x):
+        t = (x - f[2]) / max(f[3] - f[2], 1e-9)
+        return f[4] + (f[6] - f[4]) * t, f[5] + (f[7] - f[5]) * t
+
+    for x in (left, right):
+        face_top, face_bottom = edges(face, x)
+        cover_top, cover_bottom = edges(cover, x)
+        if cover_top > face_top - 0.5 or cover_bottom < face_bottom + 0.5:
+            return None
+    return left, right
+
+
 class Shelf(Gtk.Widget):
     """A prateleira 3D: desenha as caixas, anima a seleção e responde a clique e roda do mouse."""
 
@@ -167,6 +196,7 @@ class Shelf(Gtk.Widget):
         self.layouts = {}
         self.vx = self.vy = 0.0
         self.width = 0
+        self.scale = 1.0  # pixels físicos por pixel lógico (divisas das faixas caem em pixels inteiros)
         self.loader = TextureLoader(self._on_loaded)
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -254,7 +284,9 @@ class Shelf(Gtk.Widget):
         """Libera as imagens de uma caixa da memória (refeitas quando ela voltar)."""
         item.token += 1
         item.state = EMPTY
-        item.front = item.front_reflection = item.spine = item.spine_reflection = item.glow = None
+        item.front = item.front_strips = item.front_reflection = None
+        item.spine = item.spine_reflection = item.glow = None
+        item.opaque = False
         self.loaded.pop(id(item), None)
 
     def _on_loaded(self, item, token, result):
@@ -262,8 +294,9 @@ class Shelf(Gtk.Widget):
         if item.token != token:
             return GLib.SOURCE_REMOVE
         item.state = READY
-        for key in ("front", "front_reflection", "spine", "spine_reflection", "glow"):
+        for key in ("front", "front_strips", "front_reflection", "spine", "spine_reflection", "glow"):
             setattr(item, key, result.get(key))
+        item.opaque = result.get("opaque", False)
         item.aspect = result.get("aspect", item.aspect)
         position = self.positions.get(id(item))
         if position is None:
@@ -388,16 +421,20 @@ class Shelf(Gtk.Widget):
             item_width, item_height = self._item_size(item, box_height, width)
             entries.append((item, x, z - rise, angle, item_width, item_height, offset))
 
+        native = self.get_native()
+        surface = native.get_surface() if native is not None else None
+        self.scale = surface.get_scale() if surface is not None and hasattr(surface, "get_scale") else self.get_scale_factor()
         if self.reflections:
             for entry in entries:
                 self._draw_item(snapshot, entry, floor, True)
+        hidden = self._hidden_parts(entries, floor)
         for entry in entries:
-            self._draw_item(snapshot, entry, floor, False)
+            self._draw_item(snapshot, entry, floor, False, hidden.get(id(entry[0])))
         self._draw_caption(snapshot, width, height)
 
-    def _draw_item(self, snapshot, entry, floor, reflected):
-        """Desenha uma caixa: frente e lombada (só as faces viradas para a tela) e o contorno."""
-        item, x, z, angle, box_width, box_height, offset = entry
+    def _faces(self, entry):
+        """Faces da caixa viradas para quem olha: [(a, b, tipo)], da mais distante para a mais próxima."""
+        item, x, z, angle, box_width, box_height, _offset = entry
         phi = math.radians(angle)
         cos, sin = math.cos(phi), math.sin(phi)
         depth = box_height * item.depth if item.boxed else 0.0
@@ -419,17 +456,79 @@ class Shelf(Gtk.Widget):
             if normal[0] * -cx + normal[1] * (PERSPECTIVE - cz) > 0:
                 visible.append((cz, a, b, kind))
         visible.sort(key=lambda face: face[0])
+        return [(a, b, kind) for _cz, a, b, kind in visible]
 
+    def _screen_face(self, a, b, y_top, y_bottom):
+        """Face projetada na tela, da esquerda para a direita, ou None se não aparece.
+
+        Devolve (a, b, x_a, x_b, topo_a, base_a, topo_b, base_b): as bordas de
+        cima e de baixo são retas entre a e b.
+        """
+        vx, vy, p = self.vx, self.vy, PERSPECTIVE
+        (ax, az), (bx, bz) = a, b
+        screen_a, screen_b = vx + ax * p / (p - az), vx + bx * p / (p - bz)
+        if screen_b < screen_a:  # a textura sempre vai da esquerda para a direita
+            a, b = b, a
+            (ax, az), (bx, bz) = a, b
+            screen_a, screen_b = screen_b, screen_a
+        if screen_b - screen_a < 0.5 or screen_b < -4 or screen_a > self.width + 4:  # fora da tela
+            return None
+        wa, wb = p - az, p - bz
+        return (a, b, screen_a, screen_b,
+                vy + p * y_top / wa, vy + p * y_bottom / wa, vy + p * y_top / wb, vy + p * y_bottom / wb)
+
+    def _hidden_parts(self, entries, floor):
+        """Trechos (x na tela) de cada face totalmente cobertos pela caixa vizinha, mais à frente.
+
+        Só caixas opacas e já carregadas escondem algo, e só quando cobrem a face
+        inteira na vertical. Esses trechos não são desenhados: nas pilhas de
+        lombadas, quase toda a frente das caixas fica escondida.
+        """
+        drawn_after = {id(entry[0]): order for order, entry in enumerate(entries)}
+        by_index = {self.positions.get(id(entry[0])): entry for entry in entries}
+        hidden = {}
+        for order, entry in enumerate(entries):
+            item = entry[0]
+            index = self.positions.get(id(item))
+            if index is None or not item.boxed:
+                continue
+            covers = []
+            for near_index in (index - 1, index + 1):
+                near = by_index.get(near_index)
+                if near is None or drawn_after[id(near[0])] <= order or not near[0].opaque:
+                    continue
+                for a, b, _kind in self._faces(near):
+                    face = self._screen_face(a, b, floor - near[5], floor)
+                    if face is not None:
+                        covers.append(face)
+            if not covers:
+                continue
+            parts = {}
+            for a, b, kind in self._faces(entry):
+                face = self._screen_face(a, b, floor - entry[5], floor)
+                if face is None:
+                    continue
+                spans = [span for cover in covers if (span := _covered(face, cover)) is not None]
+                if spans:
+                    parts[kind] = spans
+            if parts:
+                hidden[id(item)] = parts
+        return hidden
+
+    def _draw_item(self, snapshot, entry, floor, reflected, hidden=None):
+        """Desenha uma caixa: frente e lombada (só as faces viradas para a tela) e o contorno."""
+        item, _x, _z, _angle, _box_width, box_height, offset = entry
         dim = 0.32 * min(1.0, abs(offset) / 2.0) if item.boxed else 0
-        for _cz, a, b, kind in visible:
+        for a, b, kind in self._faces(entry):
             if reflected:
-                texture = item.front_reflection if kind == "front" else item.spine_reflection
-                if texture is not None:
-                    self._quad(snapshot, texture, a, b, floor, floor + box_height * boxart.REFLECTION, None, 0)
+                strips = item.front_reflection if kind == "front" else item.spine_reflection
+                if strips is not None:
+                    self._quad(snapshot, strips, a, b, floor, floor + box_height * boxart.REFLECTION, None, 0)
             else:
-                texture = item.front if kind == "front" else item.spine
+                strips = item.front_strips if kind == "front" else item.spine
                 face_dim = dim if kind == "front" else 0
-                self._quad(snapshot, texture, a, b, floor - box_height, floor, item.placeholder, face_dim)
+                skip = hidden.get(kind, ()) if hidden else ()
+                self._quad(snapshot, strips, a, b, floor - box_height, floor, item.placeholder, face_dim, skip)
                 # Contorno brilhante do item selecionado, sumindo conforme ele sai do centro.
                 glow = 1 - abs(offset) * 1.6
                 if kind == "front" and item.glow is not None and glow > 0.01:
@@ -437,89 +536,65 @@ class Shelf(Gtk.Widget):
                     self._quad(snapshot, item.glow, a, b, floor - box_height, floor, None, 0)
                     snapshot.pop()
 
-    def _quad(self, snapshot, texture, a, b, y_top, y_bottom, placeholder, dim):
+    def _quad(self, snapshot, strips, a, b, y_top, y_bottom, placeholder, dim, hidden=()):
         """Desenha uma face vertical em perspectiva usando só transformações 2D.
 
         As bordas de cima e de baixo da face na tela são retas, então a linha do
         meio também é: uma inclinação (skew) só, para a face inteira, deixa essa
         linha reta e horizontal. Sobra a altura, que muda de um lado ao outro:
-        a face é dividida em faixas verticais estreitas, cada uma com a altura do
-        seu meio, mostrando o pedaço certo da mesma imagem (recorte retangular,
-        barato). O número de faixas sai da variação de altura, para o erro ficar
-        abaixo de ~0,3 px; as divisas caem em pixels inteiros, então não há
-        frestas nem sobreposição. Face de frente = uma faixa só.
+        cada faixa da imagem (boxart.Strips) vai para a posição exata da
+        perspectiva, com a altura do seu meio. As divisas caem em pixels inteiros
+        da tela, então não há frestas nem sobreposição entre as faixas.
+        `hidden` = trechos de x cobertos pela caixa da frente (não desenhados).
         """
-        if texture is None and placeholder is None:
+        if strips is None and placeholder is None:
             return
-        vx, vy, p = self.vx, self.vy, PERSPECTIVE
-        (ax, az), (bx, bz) = a, b
-        screen_a, screen_b = vx + ax * p / (p - az), vx + bx * p / (p - bz)
-        if screen_b < screen_a:  # a textura sempre vai da esquerda para a direita
-            ax, az, bx, bz = bx, bz, ax, az
-            screen_a, screen_b = screen_b, screen_a
-        if screen_b - screen_a < 0.5 or screen_b < -4 or screen_a > self.width + 4:  # fora da tela
+        face = self._screen_face(a, b, y_top, y_bottom)
+        if face is None:
             return
-        wa, wb = p - az, p - bz
-        top_a, bottom_a = vy + p * y_top / wa, vy + p * y_bottom / wa
-        top_b, bottom_b = vy + p * y_top / wb, vy + p * y_bottom / wb
+        (ax, az), (bx, bz), screen_a, screen_b, top_a, bottom_a, top_b, bottom_b = face
+        vx, p, scale = self.vx, PERSPECTIVE, self.scale
         height_a, height_b = bottom_a - top_a, bottom_b - top_b
         width = screen_b - screen_a
         # Origem num pixel inteiro: as divisas das faixas também ficam em pixels inteiros.
-        origin = math.floor(screen_a)
+        origin = math.floor(screen_a * scale) / scale
         start, end = screen_a - origin, screen_b - origin
         middle_a = (top_a + bottom_a) / 2
         slope = ((top_b + bottom_b) / 2 - middle_a) / width
-        middle_origin = middle_a - slope * start  # linha do meio na origem
-        count = max(1, min(MAX_STRIPS, math.ceil(abs(height_b - height_a) / STRIP_ERROR), int(width)))
+        grow = (height_b - height_a) / width
+        wa, dx, dz = p - az, bx - ax, bz - az
+        if strips is not None:
+            pieces = strips.pieces
+        else:
+            count = max(1, min(48, math.ceil(abs(height_b - height_a) / PLACEHOLDER_ERROR)))
+            pieces = [(i / count, (i + 1) / count, None) for i in range(count)]
         shade = _rgba(0, 0, 0, dim) if dim > 0.02 else None
-        _STATS.append((count, round(width), round(abs(height_b - height_a), 1), round(y_bottom - y_top)))  # DEBUG
 
         snapshot.save()
-        snapshot.translate(Graphene.Point().init(origin, middle_origin))
+        snapshot.translate(Graphene.Point().init(origin, middle_a - slope * start))
         if abs(slope) > 1e-6:
             snapshot.transform(Gsk.Transform().skew(0, math.degrees(math.atan(slope))))
-        if count == 1:
-            height = (height_a + height_b) / 2
-            rect = Graphene.Rect().init(start, -height / 2, width, height)
+        u1 = start
+        for _s0, s1, texture in pieces:
+            u0 = u1
+            if s1 >= 1.0:
+                u1 = end
+            else:
+                # x exato do fim da faixa na tela, arredondado para o pixel (físico) mais próximo
+                screen = vx + p * (ax + dx * s1) / (wa - dz * s1)
+                u1 = max(u0, round(screen * scale) / scale - origin)
+            if u1 - u0 < 1e-3:
+                continue
+            if hidden and any(left <= u0 + origin and u1 + origin <= right for left, right in hidden):
+                continue
+            height = height_a + grow * ((u0 + u1) / 2 - start)
+            rect = Graphene.Rect().init(u0, -height / 2, u1 - u0, height)
             if texture is not None:
                 snapshot.append_scaled_texture(texture, FILTER, rect)
             else:
                 snapshot.append_color(placeholder, rect)
             if shade is not None:
                 snapshot.append_color(shade, rect)
-        else:
-            # Coordenada s (0 a 1) da imagem em cada x da tela (perspectiva exata).
-            dx, dz = bx - ax, bz - az
-
-            def image_s(u):
-                rx = u + origin - vx
-                return (rx * wa - p * ax) / (p * dx + rx * dz)
-
-            reach = max(height_a, height_b)
-            u1, s1 = start, 0.0
-            for i in range(1, count + 1):
-                u0, s0 = u1, s1
-                if i == count:
-                    u1, s1 = end, 1.0
-                else:
-                    u1 = float(round(start + width * i / count))
-                    if u1 <= u0:
-                        continue
-                    s1 = image_s(u1)
-                strip = u1 - u0
-                height = height_a + (height_b - height_a) * ((u0 + u1) / 2 - start) / width
-                band = Graphene.Rect().init(u0, -height / 2, strip, height)
-                if texture is not None:
-                    full = strip / max(s1 - s0, 1e-9)  # largura da imagem inteira nesta faixa
-                    snapshot.push_clip(Graphene.Rect().init(u0, -reach, strip, reach * 2))
-                    snapshot.append_scaled_texture(
-                        texture, FILTER, Graphene.Rect().init(u0 - s0 * full, -height / 2, full, height)
-                    )
-                    snapshot.pop()
-                else:
-                    snapshot.append_color(placeholder, band)
-                if shade is not None:
-                    snapshot.append_color(shade, band)
         snapshot.restore()
 
     def _draw_caption(self, snapshot, width, height):

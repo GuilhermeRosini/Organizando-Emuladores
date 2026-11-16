@@ -65,8 +65,9 @@ def build(module, boxed):
             items.append(module.ShelfItem(title="", meta="", make_front=lambda d=d: boxart.cover_surface(d / "console.png", 640)))
     for it in items:
         result = module._prepare(it)
-        for key in ("front", "front_reflection", "spine", "spine_reflection", "glow"):
+        for key in ("front", "front_strips", "front_reflection", "spine", "spine_reflection", "glow"):
             setattr(it, key, result.get(key))
+        it.opaque = result.get("opaque", False)
         it.aspect = it.shown_aspect = result.get("aspect", it.aspect)
         it.state = module.READY
     sh.items = items
@@ -108,10 +109,7 @@ for boxed in (False, True):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
-        shelf._STATS.clear()
-        new.do_snapshot(Gtk.Snapshot())
-        st = shelf._STATS
-        print("FACES", len(st), "faixas", sum(c for c, *_ in st), "maiores:", sorted(st, reverse=True)[:8])
+
         node_old, t_old = frame(old, position)
         tag = f"{'jogos' if boxed else 'consoles'}-{position}"
         ref = renderers["vulkan"].render_texture(node_old, Graphene.Rect().init(0, 0, W, H))
