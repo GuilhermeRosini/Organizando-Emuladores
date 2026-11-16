@@ -1,0 +1,23 @@
+name: Teste de imagens (Windows)
+on:
+  push:
+    branches: [teste-imagens]
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rodar teste com o Python do runtime
+        shell: cmd
+        run: |
+          set PATH=%CD%\Sistema\windows\runtime\bin;%PATH%
+          set PYTHONHOME=
+          set PYTHONPATH=
+          set PYTHONUTF8=1
+          Sistema\windows\runtime\bin\python.exe .github\teste\imagens.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: saida
+          path: saida/
