@@ -117,8 +117,18 @@ for name, cls in (("vulkan", Gsk.VulkanRenderer), ("cairo", Gsk.CairoRenderer)):
     except Exception as e:  # noqa: BLE001
         print("NAO REALIZOU", name, e)
 
+probe = build(shelf, False)
+for rname, r in renderers.items():
+    print(f"TESTE MATRIZ {rname}: funciona = {shelf._matrix_works(probe, r)}")
+
 for boxed in (False, True):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
+    matrix = build(shelf, boxed)
+    matrix.use_matrix = True
+    n_m, t_m = frame(matrix, 2.35)
+    out = renderers["vulkan"].render_texture(n_m, Graphene.Rect().init(0, 0, W, H))
+    out.save_to_png(str(OUT / f"p-{'jogos' if boxed else 'consoles'}-matriz.png"))
+    print(f"MATRIZ python {t_m:5.2f} ms")
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
         node_old, t_old = frame(old, position)

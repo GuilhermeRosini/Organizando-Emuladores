@@ -8,6 +8,10 @@ Desempenho:
   4.24 do Windows (rosa, embaralhado ou com frestas); retângulos recortados
   funcionam igual em todos os renderizadores. Faces de frente = uma faixa só.
 - Partes de caixas totalmente escondidas atrás da vizinha não são desenhadas.
+- Onde a matriz de projeção 3D funciona (testado uma vez ao abrir, desenhando
+  um xadrez colorido e conferindo os pixels), cada face é uma imagem só com a
+  matriz: o jeito mais leve. As faixas só entram onde a matriz sai errada
+  (GTK 4.24 do Windows em alguns vídeos, ou o renderizador cairo).
 - Em movimento as faixas são mais largas (erro invisível com a caixa andando);
   quando a prateleira para, o último quadro sai com a precisão total e fica
   guardado, para não ser recalculado à toa.
@@ -35,6 +39,7 @@ KEEP = 32  # caixas mantidas na memória de cada lado
 STRIP_ERROR = 0.3  # erro máximo (px) de posição dentro de uma faixa
 REFLECTION_ERROR = 0.6  # reflexos são apagados: podem errar um pouco mais (menos faixas)
 SIDE_REFLECTION_ERROR = 1.5  # reflexos das pilhas de lado: bem apagados e cobertos pelos da frente
+UNIT = 1000.0  # quadrado em que a textura é desenhada antes da matriz de projeção
 MOTION_ERROR = 5.0  # em movimento o erro pode ser 5x maior (ninguém vê): ~5x menos faixas
 MAX_STRIPS = 240
 SLOW_FRAME_US = 30_000  # quadros acima disso (≈33 fps) contam como lentos
@@ -176,6 +181,51 @@ def _covered(face, cover):
     return left, right
 
 
+def _matrix_works(shelf, renderer):
+    """Teste do _quad_matrix no renderizador de verdade: xadrez de 4 cores em perspectiva."""
+    import cairo
+
+    size, cell = 256, 32
+    colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0)]
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+    cr = cairo.Context(surface)
+    for cy in range(size // cell):
+        for cx in range(size // cell):
+            cr.set_source_rgb(*colors[(cx + 2 * cy) % 4])
+            cr.rectangle(cx * cell, cy * cell, cell, cell)
+            cr.fill()
+    texture = boxart.texture(surface)
+    width, height = 320, 240
+    saved = shelf.vx, shelf.vy, shelf.width
+    shelf.vx, shelf.vy, shelf.width = width / 2, height / 2, width
+    a, b, y_top, y_bottom = (-70.0, 250.0), (70.0, -250.0), -90.0, 90.0
+    try:
+        snapshot = Gtk.Snapshot()
+        snapshot.append_color(_rgba(0, 0, 0), _rect(0, 0, width, height))
+        shelf._quad_matrix(snapshot, texture, a, b, y_top, y_bottom, None, 0)
+        rendered = renderer.render_texture(snapshot.to_node(), _rect(0, 0, width, height))
+    finally:
+        shelf.vx, shelf.vy, shelf.width = saved
+    downloader = Gdk.TextureDownloader.new(rendered)
+    downloader.set_format(Gdk.MemoryFormat.R8G8B8A8)
+    data, stride = downloader.download_bytes()
+    pixels = data.get_data()
+    p = PERSPECTIVE
+    good = total = 0
+    for cy in range(size // cell):
+        for cx in range(size // cell):
+            s, t = (cx + 0.5) * cell / size, (cy + 0.5) * cell / size
+            w = p - (a[1] + (b[1] - a[1]) * s)
+            x = width / 2 + p * (a[0] + (b[0] - a[0]) * s) / w
+            y = height / 2 + p * (y_top + (y_bottom - y_top) * t) / w
+            i = int(y) * stride + int(x) * 4
+            expected = colors[(cx + 2 * cy) % 4]
+            total += 1
+            if all(abs(pixels[i + k] - 255 * expected[k]) < 60 for k in range(3)):
+                good += 1
+    return good >= total * 0.95
+
+
 class Shelf(Gtk.Widget):
     """A prateleira 3D: desenha as caixas, anima a seleção e responde a clique e roda do mouse."""
 
@@ -203,12 +253,17 @@ class Shelf(Gtk.Widget):
         self.width = 0
         self.scale = 1.0  # pixels físicos por pixel lógico (divisas das faixas caem em pixels inteiros)
         self.moving = False  # animando ou arrastando: desenho mais leve
+        self.use_matrix = False  # a matriz 3D funciona neste computador? (testado ao aparecer)
+        self.matrix_tested = False
+        self.matrix = Graphene.Matrix()
+        self.unit = Graphene.Rect().init(0, 0, UNIT, UNIT)
         self.cache_key = None  # prateleira parada: o desenho fica guardado
         self.cache_node = None
         self.loader = TextureLoader(self._on_loaded)
         self.set_hexpand(True)
         self.set_vexpand(True)
         self.set_focusable(True)
+        self.connect("map", lambda _widget: GLib.idle_add(self._test_matrix))
 
         # Arrastar com o mouse: a prateleira acompanha o ponteiro.
         self.dragging = False
@@ -433,7 +488,7 @@ class Shelf(Gtk.Widget):
         surface = native.get_surface() if native is not None else None
         self.scale = surface.get_scale() if surface is not None and hasattr(surface, "get_scale") else self.get_scale_factor()
         self.moving = bool(self.tick_id) or self.dragging
-        key = (width, height, self.position, self.reveal, self.reflections, self.scale,
+        key = (width, height, self.position, self.reveal, self.reflections, self.scale, self.use_matrix,
                tuple((id(entry[0]), entry[0].state, entry[0].token, entry[0].shown_aspect) for entry in entries))
         if not self.moving and key == self.cache_key and self.cache_node is not None:
             snapshot.append_node(self.cache_node)
@@ -442,7 +497,7 @@ class Shelf(Gtk.Widget):
             if self.reflections:
                 for entry in entries:
                     self._draw_item(boxes, entry, floor, True)
-            hidden = self._hidden_parts(entries, floor)
+            hidden = {} if self.use_matrix else self._hidden_parts(entries, floor)
             for entry in entries:
                 self._draw_item(boxes, entry, floor, False, hidden.get(id(entry[0])))
             node = boxes.to_node()
@@ -571,6 +626,9 @@ class Shelf(Gtk.Widget):
         """
         if texture is None and placeholder is None:
             return
+        if self.use_matrix:
+            self._quad_matrix(snapshot, texture, a, b, y_top, y_bottom, placeholder, dim)
+            return
         face = self._screen_face(a, b, y_top, y_bottom)
         if face is None:
             return
@@ -633,6 +691,57 @@ class Shelf(Gtk.Widget):
                 snapshot.append_color(placeholder, band)
                 if shade is not None:
                     snapshot.append_color(shade, band)
+
+    def _quad_matrix(self, snapshot, texture, a, b, y_top, y_bottom, placeholder, dim):
+        """Desenha a face como uma imagem só, com uma matriz de projeção (homografia).
+
+        Exato e o mais leve, mas só é usado onde _test_matrix confirmou que o
+        renderizador do GTK desenha matrizes 3D certo.
+        """
+        face = self._screen_face(a, b, y_top, y_bottom)
+        if face is None:
+            return
+        (ax, az), (bx, bz) = face[0], face[1]
+        vx, vy, p = self.vx, self.vy, PERSPECTIVE
+        dx, dz, dy = (bx - ax) / UNIT, (bz - az) / UNIT, (y_bottom - y_top) / UNIT
+        w0 = p - az
+        # Ponto (s, t) da textura -> tela: x = vx + p·(ax + s·dx) / (w0 − s·dz), y = vy + p·(y_top + t·dy) / (w0 − s·dz)
+        self.matrix.init_from_float([
+            p * dx - vx * dz, -vy * dz, 0, -dz,
+            0, p * dy, 0, 0,
+            0, 0, 1, 0,
+            vx * w0 + p * ax, vy * w0 + p * y_top, 0, w0,
+        ])
+        snapshot.save()
+        snapshot.transform_matrix(self.matrix)
+        if texture is not None:
+            snapshot.append_scaled_texture(texture, FILTER, self.unit)
+        else:
+            snapshot.append_color(placeholder, self.unit)
+        if dim > 0.02:
+            snapshot.append_color(_rgba(0, 0, 0, dim), self.unit)
+        snapshot.restore()
+
+    def _test_matrix(self):
+        """Desenha um xadrez colorido em perspectiva com a matriz e confere os pixels.
+
+        Se o renderizador deste computador desenhar certo, a prateleira usa a
+        matriz (uma imagem por face, bem leve). Senão, continua com as faixas.
+        """
+        if self.matrix_tested:
+            return GLib.SOURCE_REMOVE
+        native = self.get_native()
+        renderer = native.get_renderer() if native is not None else None
+        if renderer is None or not renderer.is_realized():
+            return GLib.SOURCE_REMOVE  # tenta de novo no próximo "map"
+        self.matrix_tested = True
+        try:
+            self.use_matrix = _matrix_works(self, renderer)
+        except Exception:  # noqa: BLE001 - na dúvida, faixas (funcionam em todo lugar)
+            self.use_matrix = False
+        self.cache_key = None
+        self.queue_draw()
+        return GLib.SOURCE_REMOVE
 
     def _draw_caption(self, snapshot, width, height):
         """Escreve o nome e as informações da caixa selecionada embaixo dela."""
