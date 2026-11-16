@@ -90,6 +90,17 @@ def frame(sh, position):
     return s.to_node(), took
 
 
+class Counter:
+    """Repassa as chamadas para o Gtk.Snapshot contando quantas faixas (recortes) foram desenhadas."""
+
+    def __init__(self, snap):
+        self.snap, self.calls = snap, {}
+
+    def __getattr__(self, name):
+        self.calls[name] = self.calls.get(name, 0) + 1
+        return getattr(self.snap, name)
+
+
 def pixels(tex):
     d = Gdk.TextureDownloader.new(tex)
     d.set_format(Gdk.MemoryFormat.R8G8B8A8)
@@ -109,6 +120,9 @@ for boxed in (False, True):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
+        c = Counter(Gtk.Snapshot())
+        new.do_snapshot(c)
+        print("CHAMADAS", c.calls)
 
         node_old, t_old = frame(old, position)
         tag = f"{'jogos' if boxed else 'consoles'}-{position}"

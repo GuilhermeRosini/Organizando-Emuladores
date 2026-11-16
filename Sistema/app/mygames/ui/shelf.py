@@ -150,7 +150,8 @@ def _covered(face, cover):
     """Trecho de x (na tela) em que `cover` esconde `face` por inteiro, na vertical; ou None.
 
     As bordas de cima e de baixo das duas faces são retas, então basta comparar
-    nas pontas do trecho em comum. Deixa 1 px de folga de cada lado (bordas
+    nas pontas do trecho em comum (com 0,25 px de tolerância: caixas iguais lado
+    a lado têm a mesma altura). Deixa 1 px de folga de cada lado (bordas
     suavizadas da face da frente).
     """
     left = max(face[2], cover[2]) + 1
@@ -165,7 +166,7 @@ def _covered(face, cover):
     for x in (left, right):
         face_top, face_bottom = edges(face, x)
         cover_top, cover_bottom = edges(cover, x)
-        if cover_top > face_top - 0.5 or cover_bottom < face_bottom + 0.5:
+        if cover_top > face_top + 0.25 or cover_bottom < face_bottom - 0.25:
             return None
     return left, right
 
