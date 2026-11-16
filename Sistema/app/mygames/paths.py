@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 # Estrutura do hub:
-#   <raiz>/Abrir My Games          ← o único arquivo para clicar
+#   <raiz>/Abrir My Games (Linux)        ← o arquivo para clicar no Linux
+#   <raiz>/Abrir My Games (Windows).exe  ← o arquivo para clicar no Windows
 #   <raiz>/Emuladores/<Console>/   ← emulador + "Adicionar Jogos"
 #   <raiz>/Sistema/                ← programa, configuração e registros
 APP_DIR = Path(__file__).resolve().parent.parent

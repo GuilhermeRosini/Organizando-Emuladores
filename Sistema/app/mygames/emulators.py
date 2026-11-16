@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from . import controllers, portable
+from . import big_files, controllers, portable
 from .paths import CACHE_DIR, GAMES_FOLDER_NAME, IS_WINDOWS, LOGS_DIR, WINDOWS_EMULATOR_FOLDER, display_path
 
 SKIPPED_FOLDERS = {"dados", "bios", "saves", "cores", "autoconfig", "__pycache__", GAMES_FOLDER_NAME.casefold()}
@@ -479,7 +479,7 @@ class Emulator:
         """Onde o emulador está, para mostrar nas Configurações."""
         if self.kind == "flatpak":
             return f"Flatpak {self.target}"
-        return display_path(self.target)
+        return display_path(big_files.hub_path(self.target))
 
 
 def _is_elf(path):
@@ -502,7 +502,7 @@ def is_program(path):
     Windows: arquivo .exe que não seja instalador/atualizador.
     """
     path = Path(path)
-    if not path.is_file() or path.suffix.casefold() in NOT_PROGRAMS:
+    if not path.is_file() or path.suffix.casefold() in NOT_PROGRAMS or big_files.is_part(path):
         return False
     if IS_WINDOWS:
         name = path.name.casefold()
@@ -514,7 +514,11 @@ def is_program(path):
 
 
 def programs_in(folder):
-    """Programas dentro da pasta do console (e um nível de subpastas), ignorando dados/BIOS/jogos."""
+    """Programas dentro da pasta do console (e um nível de subpastas), ignorando dados/BIOS/jogos.
+
+    Emuladores guardados em partes (grandes demais para o GitHub) entram como
+    a cópia inteira, juntada no cache local.
+    """
     folder = Path(folder)
     if not folder.is_dir():
         return []
@@ -525,6 +529,7 @@ def programs_in(folder):
             found += [child for child in sorted(entry.iterdir()) if is_program(child)]
         elif is_program(entry):
             found.append(entry)
+    found += [path for path in big_files.whole_files(folder) if is_program(path)]
     return found
 
 

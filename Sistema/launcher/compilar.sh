@@ -1,11 +1,11 @@
 #!/bin/sh
 # Recompila os arquivos para clicar, na raiz do hub:
-#   "Abrir My Games"      (Linux)   — precisa do gcc
-#   "Abrir My Games (Windows).exe" (Windows) — precisa do gcc-mingw-w64-x86-64 (sudo apt install gcc-mingw-w64-x86-64)
+#   "Abrir My Games (Linux)"         — precisa do gcc
+#   "Abrir My Games (Windows).exe"   — precisa do gcc-mingw-w64-x86-64 (sudo apt install gcc-mingw-w64-x86-64)
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT="$DIR/../.."
 
-gcc -O2 -static -s -o "$ROOT/Abrir My Games" "$DIR/abrir.c" && echo "Pronto: Abrir My Games (Linux)"
+gcc -O2 -static -s -o "$ROOT/Abrir My Games (Linux)" "$DIR/abrir.c" && echo "Pronto: Abrir My Games (Linux)"
 
 if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
   python3 "$DIR/gerar-icone.py" >/dev/null

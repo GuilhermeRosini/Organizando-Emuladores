@@ -1,5 +1,5 @@
 /*
- * "Abrir My Games" — o único arquivo na raiz do hub.
+ * "Abrir My Games (Linux)" — o arquivo para clicar no Linux (fica na raiz do hub).
  * Descobre a própria pasta e executa Sistema/Iniciar My Games.sh.
  * Compilar: sh Sistema/launcher/compilar.sh
  */

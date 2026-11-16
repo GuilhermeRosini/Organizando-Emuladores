@@ -14,6 +14,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from . import big_files
 from .paths import IS_WINDOWS, WINDOWS_DIR, WINDOWS_EMULATOR_FOLDER
 
 USER_AGENT = "MyGames-Hub"
@@ -70,7 +71,8 @@ def download_linux(console, progress=None):
     folder = console.emulator_dir
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / name
-    if target.exists() and (not size or target.stat().st_size == size):
+    stored = big_files.stored_size(target)  # o arquivo pode estar guardado em partes
+    if stored is not None and (not size or stored == size):
         if progress:
             progress(1.0, f"{download.emulator} {tag} já está atualizado.")
         return target
@@ -78,8 +80,12 @@ def download_linux(console, progress=None):
     target.chmod(0o755)
     pattern = re.compile(download.asset_pattern)
     for old in folder.iterdir():
-        if old != target and old.is_file() and pattern.search(old.name):
+        old_name = big_files.original_name(old)  # versões antigas, inteiras ou em partes
+        if old_name != name and old.is_file() and pattern.search(old_name):
             Path(old).unlink(missing_ok=True)
+            big_files.drop_cached(old_name)
+    # Maior que o GitHub aceita (ex.: RMG, ~170 MB): fica guardado em partes.
+    big_files.split(target)
     if progress:
         progress(1.0, f"{download.emulator} {tag} instalado.")
     return target

@@ -146,7 +146,7 @@ class MyGamesApp:
         if self.config_error:
             self.toast(self.config_error, error=True)
         GLib.timeout_add_seconds(2, self._tune_garbage_collector)
-        # Ícone do controle no arquivo "Abrir My Games", no tema e no atalho do menu.
+        # Ícone do controle no arquivo "Abrir My Games (Linux)", no tema e no atalho do menu.
         threading.Thread(target=desktop.sync_desktop_integration, daemon=True).start()
 
     @staticmethod
@@ -420,8 +420,17 @@ class MyGamesApp:
         if self.tab == "home":
             self.shelf.queue_draw()
 
+    def _computer_folders_text(self, console):
+        """Linha da caixa "Usar pasta do PC": quais pastas do computador já são lidas."""
+        folders = self.config.game_folders(console.id)
+        if not folders:
+            return "Escolha uma pasta do computador que já tem jogos (nada é copiado)"
+        names = ", ".join(display_path(folder) for folder in folders[:2])
+        more = f" e mais {len(folders) - 2}" if len(folders) > 2 else ""
+        return f"Lendo {names}{more} · escolha outra pasta (remova no Menu)"
+
     def _console_items(self, console, games):
-        """Caixas de um console: "Adicionar jogos", "Abrir emulador" e os jogos."""
+        """Caixas de um console: "Adicionar jogos", "Usar pasta do PC", "Abrir emulador" e os jogos."""
         theme = theme_for(console.id)
         state = self.emulator_states.get(console.id) or self.emulator_state(console)
         label = TAB_NAMES.get(console.id, console.short)
@@ -441,7 +450,11 @@ class MyGamesApp:
                 placeholder=placeholder,
             )
 
-        items = [special("Adicionar jogos", "Abre a pasta Adicionar Jogos", "+", "Pasta de jogos", "folder", "+")]
+        # Duas formas de ter jogos: copiar para a pasta do hub ou ler de uma pasta que já existe no PC.
+        items = [
+            special("Adicionar jogos", "Abre a pasta Adicionar Jogos do hub: copie os jogos para lá", "+", "Pasta do hub", "folder", "+"),
+            special("Usar pasta do PC", self._computer_folders_text(console), "…", "Pasta do computador", "add_folder", "PC"),
+        ]
         if state.ready:
             items.append(special(f"Abrir {emulator_name}", f"Emulador · {state.label}", "▶", "Emulador", "emulator", "EMU"))
         else:
@@ -660,8 +673,40 @@ class MyGamesApp:
             self.launch(CONSOLES[self.tab], None, item)
         elif kind == "folder":
             open_folder(CONSOLES[self.tab].games_dir)
+        elif kind == "add_folder":
+            self._choose_games_folder(CONSOLES[self.tab])
         elif kind == "settings":
             self.show_settings(self.tab)
+
+    def _choose_games_folder(self, console):
+        """Escolhe uma pasta do computador que já tem jogos: o hub lê de lá, sem copiar nada."""
+        dialog = Gtk.FileDialog(title=f"Escolha a pasta com seus jogos de {console.name}")
+
+        def chosen(dialog, result):
+            """Pasta escolhida: os jogos dela aparecem junto com os da Adicionar Jogos."""
+            try:
+                folder = dialog.select_folder_finish(result)
+            except GLib.Error:
+                return  # cancelou
+            if folder is None or not folder.get_path():
+                self.toast("Escolha uma pasta deste computador (ou de um HD/pendrive conectado).", error=True)
+                return
+            path = Path(folder.get_path()).resolve()
+            if path == console.games_dir.resolve():
+                self.toast("Essa já é a pasta Adicionar Jogos do hub.")
+                return
+            if path in self.config.game_folders(console.id):
+                self.toast(f"A pasta {display_path(path)} já está na lista.")
+                return
+            try:
+                self.config.add_game_folder(console.id, path)
+            except ConfigError as error:
+                self.toast(str(error), error=True)
+                return
+            self.toast(f"Pasta adicionada: {display_path(path)}. Procurando os jogos…")
+            self.refresh_console(console)
+
+        dialog.select_folder(self.window, None, chosen)
 
     def activate_selected(self):
         """Confirma a caixa selecionada (Enter / botão A)."""

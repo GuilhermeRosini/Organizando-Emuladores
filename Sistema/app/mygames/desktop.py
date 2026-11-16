@@ -2,7 +2,7 @@
 
 Tudo aqui é refeito a cada abertura do hub, então continua certo mesmo depois
 de mover/copiar a pasta ou levar para outro computador:
-- o arquivo "Abrir My Games" ganha o ícone do controle no gerenciador de arquivos;
+- o arquivo "Abrir My Games (Linux)" ganha o ícone do controle no gerenciador de arquivos;
 - o ícone é instalado no tema do usuário (janela e dock mostram o controle);
 - se o atalho do menu já existir, o caminho dele é atualizado.
 
@@ -17,7 +17,7 @@ from pathlib import Path
 from .paths import APP_ICON, ROOT
 
 APP_ID = "com.mygames.Library"  # mesmo ID do Gtk.Application: liga a janela ao ícone
-LAUNCHER = ROOT / "Abrir My Games"
+LAUNCHER = ROOT / "Abrir My Games (Linux)"
 OLD_SHORTCUTS = ("my-games.desktop", "My Games.desktop")  # nomes usados por versões antigas
 
 
@@ -78,7 +78,7 @@ def install_icon():
 
 
 def set_launcher_icon():
-    """Mostra o ícone do controle no arquivo "Abrir My Games" (Nautilus, Nemo, Caja).
+    """Mostra o ícone do controle no arquivo "Abrir My Games (Linux)" (Nautilus, Nemo, Caja).
 
     No Linux um executável não carrega ícone dentro de si; o gerenciador de
     arquivos usa este atributo (guardado pelo GVfs neste computador).

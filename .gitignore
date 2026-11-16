@@ -1,20 +1,25 @@
 # =============================================================================
 # My Games — o que NÃO vai para o GitHub
 #
-# Vai para o GitHub (para funcionar só baixando o ZIP e clicando no .exe):
-#   - o programa (Sistema/app), os launchers e o runtime do Windows (Python + GTK)
-#   - os emuladores do Windows (Emuladores/<Console>/Windows)
+# Vai TUDO o que faz o hub funcionar só baixando o ZIP: o programa, o runtime
+# do Windows, os emuladores (Windows e Linux) e as configurações deles.
+# O emulador de N64 do Linux passa de 100 MB (limite do GitHub), por isso fica
+# guardado em partes (.parte1, .parte2); o hub junta sozinho quando precisa.
 #
-# NÃO vai: jogos, BIOS, saves e configurações pessoais.
+# Fica de fora só o que é de cada pessoa:
+#   - jogos (não podem ser distribuídos)
+#   - saves, memory cards, save states, capturas de tela e listas de jogos
+#   - BIOS (têm direitos autorais, como os jogos; cada um coloca a sua)
+#   - configuração pessoal do hub (pastas de jogos deste computador)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Jogos (não podem ser distribuídos)
+# Jogos
 # -----------------------------------------------------------------------------
 Emuladores/*/Adicionar Jogos/*
 !Emuladores/*/Adicionar Jogos/.gitkeep
 
-# Rede de segurança: arquivos de jogo em qualquer outra pasta do hub
+# Rede de segurança: jogo esquecido em qualquer outra pasta do hub
 *.iso
 *.cso
 *.zso
@@ -37,78 +42,83 @@ Emuladores/*/Adicionar Jogos/*
 *.gbc
 *.gb
 *.neo
-*.cue
-*.img
+*.pbp
 *.mdf
 *.mds
 *.ecm
-*.pbp
-# .zip/.7z/.rar/.bin também são formatos de jogo, mas os emuladores do Windows
-# trazem arquivos com essas extensões que são necessários (por isso a exceção).
-*.zip
-*.7z
-*.rar
-*.bin
-!Emuladores/*/Windows/**
+# .zip/.7z/.rar/.bin/.cue/.img também são jogos, mas os emuladores usam essas
+# extensões nos próprios arquivos: por isso só valem soltos na pasta do console.
+Emuladores/*/*.zip
+Emuladores/*/*.7z
+Emuladores/*/*.rar
+Emuladores/*/*.bin
+Emuladores/*/*.cue
+Emuladores/*/*.img
 
 # -----------------------------------------------------------------------------
-# BIOS (protegidas por direitos autorais; cada um coloca a sua)
+# BIOS (cada pessoa coloca a sua em Emuladores/<Console>/bios)
 # -----------------------------------------------------------------------------
 Emuladores/*/bios/*
 !Emuladores/*/bios/.gitkeep
-Emuladores/*/Windows/system/
 Emuladores/*/Windows/bios/
+Emuladores/*/Windows/system/
 
 # -----------------------------------------------------------------------------
-# Saves, memory cards e dados pessoais dos emuladores
+# Saves, memory cards, save states, capturas de tela e listas de jogos
+# (as configurações dos emuladores vão; só o que é dos jogos fica de fora)
 # -----------------------------------------------------------------------------
-Emuladores/*/dados/
-Emuladores/*/Windows/saves/
-Emuladores/*/Windows/states/
-Emuladores/*/Windows/screenshots/
-Emuladores/*/Windows/memcards/
-Emuladores/*/Windows/sstates/
-Emuladores/*/Windows/snaps/
-Emuladores/*/Windows/cache/
-Emuladores/*/Windows/logs/
-Emuladores/*/Windows/inis/
-Emuladores/*/Windows/Config/
-Emuladores/*/Windows/Cache/
-Emuladores/*/Windows/Save/
-Emuladores/*/Windows/Screenshots/
-Emuladores/*/Windows/retroarch.cfg
-Emuladores/*/Windows/config.ini
-Emuladores/*/Windows/snes9x.conf
-Emuladores/*/Windows/Saves/
+Emuladores/**/saves/
+Emuladores/**/Saves/
+Emuladores/**/Save/
+Emuladores/**/states/
+Emuladores/**/StateSaves/
+Emuladores/**/sstates/
+Emuladores/**/memcards/
+Emuladores/**/screenshots/
+Emuladores/**/Screenshots/
+Emuladores/**/ScreenShots/
+Emuladores/**/snaps/
+Emuladores/**/videos/
+Emuladores/**/covers/
+Emuladores/**/thumbnails/
+Emuladores/**/playlists/
+Emuladores/*/dados/dolphin/GC/
+Emuladores/*/dados/dolphin/Wii/
+Emuladores/*/dados/dolphin/Load/
+Emuladores/*/dados/dolphin/Dump/
+Emuladores/**/content_history.lpl
+Emuladores/**/library.sqlite3
+Emuladores/**/playtime.dat
 *.srm
 *.sav
 *.eep
 *.fla
 *.sra
 *.mpk
+*.mcr
+*.ps2
+*.gci
+*.p2s
+*.frz
 *.state
 *.state[0-9]*
 *.ss[0-9]
 *.st[0-9]
-*.p2s
-*.ps2
-*.gci
-*.mcr
-*.raw
 
-# Configuração pessoal (tem caminhos do seu computador), registros e capas baixadas
+# Caches e registros dos emuladores (eles refazem sozinhos)
+Emuladores/**/cache/
+Emuladores/**/Cache/
+Emuladores/**/logs/
+Emuladores/**/Logs/
+Emuladores/**/*.cache
+Emuladores/**/*.log
+Emuladores/**/nointro.sqlite3
+
+# Configuração pessoal do hub (caminhos das pastas de jogos deste computador),
+# registros e capas baixadas
 Sistema/config.json
 Sistema/logs/
 Sistema/capas/
-
-# -----------------------------------------------------------------------------
-# Versão Linux dos emuladores (baixada pelo Menu no Linux; o AppImage do N64
-# passa do limite de 100 MB por arquivo do GitHub)
-# -----------------------------------------------------------------------------
-Emuladores/**/*.AppImage
-Emuladores/**/*.appimage
-Emuladores/*/cores/
-Emuladores/*/autoconfig/
 
 # -----------------------------------------------------------------------------
 # Arquivos temporários e de compilação
@@ -119,7 +129,6 @@ Emuladores/*/autoconfig/
 __pycache__/
 *.pyc
 Sistema/launcher/*.res
-Sistema/windows/7zr.exe
 Thumbs.db
 desktop.ini
 .DS_Store
@@ -138,5 +147,7 @@ id_ed25519*
 *.token
 credentials*.json
 secrets*.json
+# Login/token do RetroAchievements no Dolphin
+Emuladores/**/RetroAchievements.ini
 # Exceção: certificados públicos de SSL do runtime (necessários para o HTTPS funcionar)
 !Sistema/windows/runtime/**/*.pem
