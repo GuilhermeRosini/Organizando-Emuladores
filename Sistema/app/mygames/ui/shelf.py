@@ -427,7 +427,7 @@ class Shelf(Gtk.Widget):
         if self.reflections:
             for entry in entries:
                 self._draw_item(snapshot, entry, floor, True)
-        hidden = self._hidden_parts(entries, floor)
+        hidden = self._hidden_parts(entries, floor) if getattr(self, "cull", True) else {}
         for entry in entries:
             self._draw_item(snapshot, entry, floor, False, hidden.get(id(entry[0])))
         self._draw_caption(snapshot, width, height)

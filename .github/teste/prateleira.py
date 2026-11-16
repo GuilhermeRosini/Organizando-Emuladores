@@ -105,9 +105,13 @@ for name, cls in (("vulkan", Gsk.VulkanRenderer), ("cairo", Gsk.CairoRenderer)):
     except Exception as e:  # noqa: BLE001
         print("NAO REALIZOU", name, e)
 
-for boxed in (False, True):
+for boxed in (True,):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
-    for position in (2.0, 2.35, 2.5, 2.8):
+    nocull = build(shelf, boxed)
+    nocull.cull = False
+    node_nc, _ = frame(nocull, 2.35)
+    renderers["vulkan"].render_texture(node_nc, Graphene.Rect().init(0, 0, W, H)).save_to_png(str(OUT / "p-jogos-2.35-semcorte.png"))
+    for position in (2.35,):
         node_new, t_new = frame(new, position)
 
         node_old, t_old = frame(old, position)
