@@ -24,21 +24,29 @@ vx, vy = W / 2, H * 0.45
 unit = Graphene.Rect().init(0, 0, UNIT, UNIT)
 
 
-def node(a, b, y_top, y_bottom, filt):
+def node(a, b, y_top, y_bottom, filt, variant="atual"):
     (ax, az), (bx, bz) = a, b
     dx, dz, dy = (bx - ax) / UNIT, (bz - az) / UNIT, (y_bottom - y_top) / UNIT
     w0 = P - az
-    m = Graphene.Matrix().init_from_float([
+    vals = [
         P * dx - vx * dz, -vy * dz, 0, -dz,
         0, P * dy, 0, 0,
         0, 0, 1, 0,
         vx * w0 + P * ax, vy * w0 + P * y_top, 0, w0,
-    ])
+    ]
+    if variant in ("normalizada", "normalizada-texture", "normalizada-z"):
+        vals = [v / w0 for v in vals]
+        if variant == "normalizada-z":
+            vals[10] = 1.0
+    m = Graphene.Matrix().init_from_float(vals)
     s = Gtk.Snapshot()
     s.append_color(Gdk.RGBA(red=0.05, green=0.05, blue=0.08, alpha=1), Graphene.Rect().init(0, 0, W, H))
     s.save()
     s.transform_matrix(m)
-    s.append_scaled_texture(tex, filt, unit)
+    if variant.endswith("texture"):
+        s.append_texture(tex, unit)
+    else:
+        s.append_scaled_texture(tex, filt, unit)
     s.restore()
     return s.to_node()
 
@@ -59,9 +67,14 @@ for rname, cls in renderers.items():
         print("NAO REALIZOU", rname, e)
         continue
     for cname, (a, b, t, bt) in cases.items():
-        for fname, filt in (("linear", Gsk.ScalingFilter.LINEAR), ("trilinear", Gsk.ScalingFilter.TRILINEAR)):
-            out = r.render_texture(node(a, b, t, bt, filt), Graphene.Rect().init(0, 0, W, H))
-            out.save_to_png(str(OUT / f"r-{rname}-{cname}-{fname}.png"))
-            print("OK", rname, cname, fname)
+        for variant in ("atual", "texture", "normalizada", "normalizada-texture", "normalizada-z"):
+            out = r.render_texture(node(a, b, t, bt, Gsk.ScalingFilter.LINEAR, variant), Graphene.Rect().init(0, 0, W, H))
+            out.save_to_png(str(OUT / f"r-{rname}-{cname}-{variant}.png"))
+            d = Gdk.TextureDownloader.new(out)
+            d.set_format(Gdk.MemoryFormat.R8G8B8A8)
+            data, stride = d.download_bytes()
+            raw = data.get_data()
+            pink = sum(1 for i in range(0, len(raw), 4 * 97) if raw[i] > 240 and 90 < raw[i + 1] < 130 and raw[i + 2] > 160)
+            print("OK", rname, cname, variant, "pixels rosa:", pink)
     r.unrealize()
 print("GTK", Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version())
