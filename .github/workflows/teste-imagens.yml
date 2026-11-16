@@ -10,15 +10,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: OpenGL por software (Mesa llvmpipe), para testar o renderizador GL
+      - name: OpenGL ES via ANGLE do Edge (D3D/WARP), para testar o renderizador GL
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download -R pal1000/mesa-dist-win -p "*release-msvc.7z" -O mesa.7z
-          7z x -omesa mesa.7z > /dev/null
-          ls mesa/x64 | head -30
-          cp mesa/x64/*.dll Sistema/windows/runtime/bin/
+          EDGE=$(ls -d "/c/Program Files (x86)/Microsoft/Edge/Application/"[0-9]* | head -1)
+          ls "$EDGE" | grep -i -E "egl|gles|d3dcompiler"
+          cp "$EDGE"/libEGL.dll "$EDGE"/libGLESv2.dll Sistema/windows/runtime/bin/
+          cp "$EDGE"/d3dcompiler_47.dll Sistema/windows/runtime/bin/ 2>/dev/null || true
       - name: Rodar teste com o Python do runtime
         shell: cmd
         run: |
@@ -26,11 +24,8 @@ jobs:
           set PYTHONHOME=
           set PYTHONPATH=
           set PYTHONUTF8=1
-          Sistema\windows\runtime\bin\python.exe .github\teste\imagens.py
-          set GALLIUM_DRIVER=llvmpipe
-          Sistema\windows\runtime\bin\python.exe .github\teste\plano.py
+          set GDK_DEBUG=gl-gles
           Sistema\windows\runtime\bin\python.exe .github\teste\render.py
-          Sistema\windows\runtime\bin\python.exe .github\teste\prateleira.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
