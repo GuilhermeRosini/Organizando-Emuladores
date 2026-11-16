@@ -33,6 +33,7 @@ SLOW_FRAME_US = 30_000  # quadros acima disso (≈33 fps) contam como lentos
 FILTER = Gsk.ScalingFilter.LINEAR
 
 EMPTY, QUEUED, READY = 0, 1, 2
+_STATS = []  # DEBUG
 
 
 @dataclass(eq=False)
@@ -471,6 +472,7 @@ class Shelf(Gtk.Widget):
         middle_origin = middle_a - slope * start  # linha do meio na origem
         count = max(1, min(MAX_STRIPS, math.ceil(abs(height_b - height_a) / STRIP_ERROR), int(width)))
         shade = _rgba(0, 0, 0, dim) if dim > 0.02 else None
+        _STATS.append((count, round(width), round(abs(height_b - height_a), 1), round(y_bottom - y_top)))  # DEBUG
 
         snapshot.save()
         snapshot.translate(Graphene.Point().init(origin, middle_origin))

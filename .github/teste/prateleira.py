@@ -108,6 +108,10 @@ for boxed in (False, True):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
+        shelf._STATS.clear()
+        new.do_snapshot(Gtk.Snapshot())
+        st = shelf._STATS
+        print("FACES", len(st), "faixas", sum(c for c, *_ in st), "maiores:", sorted(st, reverse=True)[:8])
         node_old, t_old = frame(old, position)
         tag = f"{'jogos' if boxed else 'consoles'}-{position}"
         ref = renderers["vulkan"].render_texture(node_old, Graphene.Rect().init(0, 0, W, H))
