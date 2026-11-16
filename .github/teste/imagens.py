@@ -73,3 +73,22 @@ print("cairo", cairo.version, "| pycairo get_data len test")
 for n, f in [("gtk_full", gtk_full), ("hub_cover", hub_cover), ("hub_texture", hub_texture),
              ("cairo_direct", cairo_direct), ("drawn_texture", drawn_texture)]:
     step(n, f)
+
+
+def compare(a, b):
+    """Diferença média por byte entre dois PNGs (0 = idênticos)."""
+    sa, sb = cairo.ImageSurface.create_from_png(str(OUT / a)), cairo.ImageSurface.create_from_png(str(OUT / b))
+    if (sa.get_width(), sa.get_height()) != (sb.get_width(), sb.get_height()):
+        return f"tamanhos diferentes {sa.get_width()}x{sa.get_height()} vs {sb.get_width()}x{sb.get_height()}"
+    da, db = bytes(sa.get_data()), bytes(sb.get_data())
+    step_ = 97
+    diff = sum(abs(da[i] - db[i]) for i in range(0, len(da), step_)) / (len(da) / step_)
+    return f"{diff:.2f}"
+
+
+for a, b in [("1-gtk-download.png", "4-cairo-direto.png"), ("1b-gtk-texture-direto.png", "4-cairo-direto.png"),
+             ("3-texture.png", "2-cover_surface.png"), ("5b-desenho-texture.png", "5a-desenho.png")]:
+    try:
+        print("DIFF", a, "x", b, "=", compare(a, b))
+    except Exception as e:  # noqa: BLE001
+        print("DIFF", a, b, "erro", e)

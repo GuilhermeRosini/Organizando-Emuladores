@@ -3,6 +3,8 @@ on:
   push:
     branches: [teste-imagens]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   windows:
     runs-on: windows-latest
@@ -21,3 +23,10 @@ jobs:
         with:
           name: saida
           path: saida/
+      - name: Guardar saida na branch
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f saida && git commit -m "saida do teste [skip ci]" && git push || true
