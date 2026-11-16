@@ -29,35 +29,6 @@ def texture(surface):
     )
 
 
-class Strips:
-    """A mesma imagem cortada em faixas verticais, cada uma numa textura.
-
-    A prateleira desenha cada face em perspectiva faixa por faixa, e cada faixa
-    usa só uma transformação 2D (deslocar, inclinar, esticar). Uma matriz de
-    projeção 3D numa imagem só sai rosa/embaralhada no GTK 4.24 do Windows
-    (renderizadores cairo e GL); transformações 2D funcionam em qualquer um.
-    """
-
-    __slots__ = ("pieces",)
-
-    def __init__(self, surface):
-        """Corta a superfície cairo em faixas: [(início, fim, textura)], com início/fim de 0 a 1."""
-        surface.flush()
-        width, height = surface.get_width(), surface.get_height()
-        count = max(2, min(12, width // 48))
-        self.pieces = []
-        for i in range(count):
-            x0, x1 = round(width * i / count), round(width * (i + 1) / count)
-            if x1 <= x0:
-                continue
-            part = cairo.ImageSurface(cairo.FORMAT_ARGB32, x1 - x0, height)
-            cr = cairo.Context(part)
-            cr.set_source_surface(surface, -x0, 0)
-            cr.set_operator(cairo.OPERATOR_SOURCE)
-            cr.paint()
-            self.pieces.append((x0 / width, x1 / width, texture(part)))
-
-
 def _layout(cr, text, font, width=None, align=Pango.Alignment.LEFT, spacing=0):
     """Prepara um texto (fonte, largura, alinhamento, espaçamento) para desenhar."""
     layout = PangoCairo.create_layout(cr)
