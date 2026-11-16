@@ -1,25 +1,142 @@
-# Configuração pessoal e registros
+# =============================================================================
+# My Games — o que NÃO vai para o GitHub
+#
+# Vai para o GitHub (para funcionar só baixando o ZIP e clicando no .exe):
+#   - o programa (Sistema/app), os launchers e o runtime do Windows (Python + GTK)
+#   - os emuladores do Windows (Emuladores/<Console>/Windows)
+#
+# NÃO vai: jogos, BIOS, saves e configurações pessoais.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Jogos (não podem ser distribuídos)
+# -----------------------------------------------------------------------------
+Emuladores/*/Adicionar Jogos/*
+!Emuladores/*/Adicionar Jogos/.gitkeep
+
+# Rede de segurança: arquivos de jogo em qualquer outra pasta do hub
+*.iso
+*.cso
+*.zso
+*.chd
+*.rvz
+*.gcm
+*.gcz
+*.wbfs
+*.wia
+*.ciso
+*.nkit.*
+*.z64
+*.n64
+*.v64
+*.sfc
+*.smc
+*.fig
+*.swc
+*.gba
+*.gbc
+*.gb
+*.neo
+*.cue
+*.img
+*.mdf
+*.mds
+*.ecm
+*.pbp
+# .zip/.7z/.rar/.bin também são formatos de jogo, mas os emuladores do Windows
+# trazem arquivos com essas extensões que são necessários (por isso a exceção).
+*.zip
+*.7z
+*.rar
+*.bin
+!Emuladores/*/Windows/**
+
+# -----------------------------------------------------------------------------
+# BIOS (protegidas por direitos autorais; cada um coloca a sua)
+# -----------------------------------------------------------------------------
+Emuladores/*/bios/*
+!Emuladores/*/bios/.gitkeep
+Emuladores/*/Windows/system/
+Emuladores/*/Windows/bios/
+
+# -----------------------------------------------------------------------------
+# Saves, memory cards e dados pessoais dos emuladores
+# -----------------------------------------------------------------------------
+Emuladores/*/dados/
+Emuladores/*/Windows/saves/
+Emuladores/*/Windows/states/
+Emuladores/*/Windows/screenshots/
+Emuladores/*/Windows/memcards/
+Emuladores/*/Windows/sstates/
+Emuladores/*/Windows/snaps/
+Emuladores/*/Windows/cache/
+Emuladores/*/Windows/logs/
+Emuladores/*/Windows/inis/
+Emuladores/*/Windows/Config/
+Emuladores/*/Windows/Cache/
+Emuladores/*/Windows/Save/
+Emuladores/*/Windows/Screenshots/
+Emuladores/*/Windows/retroarch.cfg
+Emuladores/*/Windows/config.ini
+Emuladores/*/Windows/snes9x.conf
+Emuladores/*/Windows/Saves/
+*.srm
+*.sav
+*.eep
+*.fla
+*.sra
+*.mpk
+*.state
+*.state[0-9]*
+*.ss[0-9]
+*.st[0-9]
+*.p2s
+*.ps2
+*.gci
+*.mcr
+*.raw
+
+# Configuração pessoal (tem caminhos do seu computador), registros e capas baixadas
 Sistema/config.json
 Sistema/logs/
 Sistema/capas/
-# Runtime do Windows (Python + GTK, ~125 MB): recriado com python3 Sistema/windows/montar-runtime.py
-Sistema/windows/runtime/
-Sistema/windows/7zr.exe
-Sistema/launcher/*.res
-__pycache__/
 
-# Emuladores baixados, dados/saves e BIOS (não vão para o git)
+# -----------------------------------------------------------------------------
+# Versão Linux dos emuladores (baixada pelo Menu no Linux; o AppImage do N64
+# passa do limite de 100 MB por arquivo do GitHub)
+# -----------------------------------------------------------------------------
 Emuladores/**/*.AppImage
 Emuladores/**/*.appimage
-Emuladores/**/*.part
-Emuladores/*/dados/
 Emuladores/*/cores/
 Emuladores/*/autoconfig/
-# Emuladores para Windows (baixados pelo Menu ou: python3 Sistema/app/main.py --baixar-windows todos)
-Emuladores/*/Windows/
-Emuladores/*/bios/*
-!Emuladores/*/bios/.gitkeep
 
-# Jogos
-Emuladores/*/Adicionar Jogos/*
-!Emuladores/*/Adicionar Jogos/.gitkeep
+# -----------------------------------------------------------------------------
+# Arquivos temporários e de compilação
+# -----------------------------------------------------------------------------
+*.part
+*.tmp
+.portable-*
+__pycache__/
+*.pyc
+Sistema/launcher/*.res
+Sistema/windows/7zr.exe
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# -----------------------------------------------------------------------------
+# Segurança: chaves, senhas e tokens nunca vão para o GitHub
+# -----------------------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.token
+credentials*.json
+secrets*.json
+# Exceção: certificados públicos de SSL do runtime (necessários para o HTTPS funcionar)
+!Sistema/windows/runtime/**/*.pem
