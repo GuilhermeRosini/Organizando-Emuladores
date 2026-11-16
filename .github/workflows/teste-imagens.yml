@@ -13,10 +13,10 @@ jobs:
       - name: OpenGL ES via ANGLE do Edge (D3D/WARP), para testar o renderizador GL
         shell: bash
         run: |
-          EDGE=$(ls -d "/c/Program Files (x86)/Microsoft/Edge/Application/"[0-9]* | head -1)
-          ls "$EDGE" | grep -i -E "egl|gles|d3dcompiler"
-          cp "$EDGE"/libEGL.dll "$EDGE"/libGLESv2.dll Sistema/windows/runtime/bin/
-          cp "$EDGE"/d3dcompiler_47.dll Sistema/windows/runtime/bin/ 2>/dev/null || true
+          F=$(find "/c/Program Files/Google/Chrome/Application" "/c/Program Files (x86)/Microsoft/Edge/Application" "/c/Program Files/Microsoft/Edge/Application" -iname libGLESv2.dll 2>/dev/null | head -1)
+          echo "ANGLE: $F"
+          D=$(dirname "$F")
+          cp "$D"/libEGL.dll "$D"/libGLESv2.dll Sistema/windows/runtime/bin/
       - name: Rodar teste com o Python do runtime
         shell: cmd
         run: |
