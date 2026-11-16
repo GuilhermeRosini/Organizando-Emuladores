@@ -1,0 +1,57 @@
+# Monta de novo o runtime do Windows (Python + GTK 4) e testa num Windows de verdade.
+# Roda sozinho quando o montar-runtime.py muda, ou pelo botão "Run workflow" na aba Actions.
+name: Runtime do Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Sistema/windows/montar-runtime.py
+      - .github/workflows/runtime-windows.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: runtime-windows
+  cancel-in-progress: false
+
+jobs:
+  montar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ferramentas
+        run: sudo apt-get update && sudo apt-get install -y zstd libglib2.0-bin
+      - name: Montar runtime (falha se faltar DLL)
+        run: python3 Sistema/windows/montar-runtime.py
+      - name: Enviar para a main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A Sistema/windows/runtime
+          if git diff --cached --quiet; then
+            echo "Runtime já estava atualizado."
+          else
+            git commit -m "Runtime do Windows atualizado (com GStreamer e Vulkan)"
+            git push
+          fi
+
+  testar-no-windows:
+    needs: montar
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Abrir o GTK com o Python do runtime
+        shell: cmd
+        run: |
+          set PATH=%CD%\Sistema\windows\runtime\bin;%PATH%
+          set PYTHONHOME=
+          set PYTHONPATH=
+          Sistema\windows\runtime\bin\python.exe -c "import gi; gi.require_version('Gdk','4.0'); gi.require_version('Gtk','4.0'); from gi.repository import Gdk, Gio, GLib, Gtk; print('GTK', Gtk.get_major_version(), Gtk.get_minor_version(), 'OK')"

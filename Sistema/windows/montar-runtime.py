@@ -33,9 +33,25 @@ ROOTS = ["python", "python-gobject", "python-cairo", "gtk4", "adwaita-icon-theme
 # Dependências que não são usadas pelo hub (deixam o runtime bem menor).
 EXCLUDE = {
     "tcl", "tk", "python-pip", "python-setuptools", "gcc", "binutils", "pkgconf", "gobject-introspection",
-    "vulkan-loader", "vulkan-headers", "shaderc", "spirv-tools", "glslang", "python-mako", "python-markdown",
+    "vulkan-headers", "shaderc", "spirv-tools", "glslang", "python-mako", "python-markdown",
     "meson", "ninja", "cmake", "gtk-update-icon-cache", "python-docutils", "gtk4-media-gstreamer",
-    "gstreamer", "gst-plugins-base", "gst-plugins-bad-libs", "ffmpeg", "libcloudproviders", "tinysparql",
+    "ffmpeg", "libcloudproviders", "tinysparql",
+}
+# Atenção: NÃO excluir "vulkan-loader", "gstreamer", "gst-plugins-base" nem "gst-plugins-bad-libs".
+# A libgtk-4-1.dll do MSYS2 depende direto das DLLs deles (vulkan-1.dll, libgstreamer-1.0-0.dll...).
+# Sem elas o GTK não carrega e o hub fecha com "assert g_type != TYPE_NONE" em PCs que não
+# têm essas DLLs instaladas (o vulkan-1.dll costuma vir só com driver de placa de vídeo).
+
+# DLLs que já vêm em todo Windows 10/11 (não precisam estar no runtime).
+SYSTEM_DLLS = {
+    "advapi32", "bcrypt", "bcryptprimitives", "comctl32", "comdlg32", "crypt32", "d3d11", "d3d12", "dcomp",
+    "dnsapi", "dwmapi", "dwrite", "dxgi", "gdi32", "gdiplus", "hid", "imm32", "iphlpapi", "kernel32",
+    "msimg32", "ntdll", "ole32", "oleaut32", "opengl32", "propsys", "rpcrt4", "setupapi", "shcore",
+    "shell32", "shlwapi", "user32", "userenv", "usp10", "version", "winmm", "winspool", "ws2_32",
+    "msvcrt", "ucrtbase", "secur32", "netapi32", "wtsapi32", "mpr", "dbghelp", "uxtheme", "winhttp",
+    "wininet", "normaliz", "ncrypt", "cfgmgr32", "powrprof", "mswsock", "psapi", "d3dcompiler_47", "dxva2",
+    "mfplat", "mfreadwrite", "mf", "mfuuid", "evr", "ksuser", "avrt", "mmdevapi", "windowscodecs", "d2d1",
+    "wldap32", "oleacc", "credui", "pdh", "wevtapi", "rstrtmgr", "wsock32", "dsound", "xinput1_4", "dinput8",
 }
 # Programas que ficam no runtime (o resto da pasta bin é só de desenvolvimento).
 KEEP_PROGRAMS = {"python.exe", "pythonw.exe", "gdk-pixbuf-query-loaders.exe"}
@@ -135,6 +151,60 @@ def prune(root):
             program.unlink()
 
 
+def _pe_imports(path):
+    """Nomes das DLLs que um .exe/.dll/.pyd do Windows importa (lido direto do arquivo PE)."""
+    import struct
+
+    data = path.read_bytes()
+    if data[:2] != b"MZ":
+        return []
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[pe:pe + 4] != b"PE\0\0":
+        return []
+    sections, optional_size = struct.unpack_from("<H12xH", data, pe + 6)
+    optional = pe + 24
+    directories = optional + (112 if struct.unpack_from("<H", data, optional)[0] == 0x20B else 96)
+    import_rva = struct.unpack_from("<I", data, directories + 8)[0]
+    table = optional + optional_size
+    ranges = [struct.unpack_from("<8xIIII", data, table + 40 * i) for i in range(sections)]
+
+    def offset(rva):
+        for virtual_size, address, raw_size, raw in ranges:
+            if address <= rva < address + max(virtual_size, raw_size):
+                return rva - address + raw
+        return None
+
+    names, start = [], offset(import_rva) if import_rva else None
+    while start is not None:
+        name_rva = struct.unpack_from("<I", data, start + 12)[0]
+        if name_rva == 0:
+            break
+        name_at = offset(name_rva)
+        names.append(data[name_at:data.index(b"\0", name_at)].decode("ascii", "replace"))
+        start += 20
+    return names
+
+
+def check_dlls(root):
+    """Confere se toda DLL que o runtime usa está dentro dele (ou é do próprio Windows)."""
+    available = {f.name.casefold() for f in (root / "bin").iterdir()}
+    skip_modules = {"_tkinter"}  # tkinter não é usado pelo hub
+    missing = {}
+    for path in [*root.joinpath("bin").iterdir(), *root.joinpath("lib").rglob("*.pyd")]:
+        if path.suffix.casefold() not in (".dll", ".exe", ".pyd") or path.name.split(".")[0] in skip_modules:
+            continue
+        for name in _pe_imports(path):
+            lower = name.casefold()
+            if lower in available or lower.startswith(("api-ms-win-", "ext-ms-")):
+                continue
+            if lower.rsplit(".", 1)[0] in SYSTEM_DLLS:
+                continue
+            missing.setdefault(name, []).append(path.name)
+    for name, users in sorted(missing.items()):
+        print(f"FALTANDO: {name} (usada por {', '.join(sorted(users)[:3])})")
+    return not missing
+
+
 def compile_schemas(root):
     """Compila as configurações do GTK (o formato é o mesmo no Linux e no Windows)."""
     schemas = root / "share" / "glib-2.0" / "schemas"
@@ -157,6 +227,9 @@ def main():
         root = work / "ucrt64"
         prune(root)
         compile_schemas(root)
+        if not check_dlls(root):
+            print("Erro: o runtime ficou sem DLLs que o hub precisa no Windows (veja a lista acima).")
+            return 1
         shutil.rmtree(RUNTIME, ignore_errors=True)
         root.rename(RUNTIME)
     size = sum(f.stat().st_size for f in RUNTIME.rglob("*") if f.is_file()) / 1e6
