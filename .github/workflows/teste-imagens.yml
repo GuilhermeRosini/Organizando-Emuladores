@@ -18,6 +18,7 @@ jobs:
           set PYTHONPATH=
           set PYTHONUTF8=1
           Sistema\windows\runtime\bin\python.exe .github\teste\imagens.py
+          Sistema\windows\runtime\bin\python.exe .github\teste\render.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -29,4 +30,4 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f saida && git commit -m "saida do teste [skip ci]" && git push || true
+          git pull --rebase -q || true; git add -f saida && git commit -m "saida do teste [skip ci]" && git push || true
