@@ -18,6 +18,8 @@ jobs:
           gh release download -R pal1000/mesa-dist-win -p "*release-msvc.7z" -O mesa.7z
           7z x -omesa mesa.7z > /dev/null
           cat mesa/x64/lvp_icd.x86_64.json
+          JSON=$(cygpath -w "$PWD/mesa/x64/lvp_icd.x86_64.json")
+          reg add 'HKLM\SOFTWARE\Khronos\Vulkan\Drivers' //v "$JSON" //t REG_DWORD //d 0 //f
       - name: Rodar teste com o Python do runtime
         shell: cmd
         run: |
