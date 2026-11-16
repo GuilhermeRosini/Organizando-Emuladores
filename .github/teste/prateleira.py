@@ -82,6 +82,7 @@ def frame(sh, position):
     s.append_color(Gdk.RGBA(red=0.05, green=0.05, blue=0.08, alpha=1), Graphene.Rect().init(0, 0, W, H))
     start = time.perf_counter()
     for _ in range(20):
+        sh.cache_key = None
         s2 = Gtk.Snapshot()
         sh.do_snapshot(s2)
         s2.to_node()
@@ -120,23 +121,13 @@ for boxed in (False, True):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
-        c = Counter(Gtk.Snapshot())
-        faces = []
-        original = type(new)._quad
-
-        def spy(self, snapshot, texture, a, b, y_top, y_bottom, placeholder, dim, hidden=(), error=shelf.STRIP_ERROR):
-            before = c.calls.get("push_clip", 0)
-            original(self, snapshot, texture, a, b, y_top, y_bottom, placeholder, dim, hidden, error)
-            f = self._screen_face(a, b, y_top, y_bottom)
-            faces.append((c.calls.get("push_clip", 0) - before, "reflexo" if error != shelf.STRIP_ERROR else "face",
-                          round(f[3] - f[2]) if f else 0, len(hidden)))
-
-        type(new)._quad = spy
-        new.do_snapshot(c)
-        type(new)._quad = original
-        print("CHAMADAS", c.calls, "| maiores:", sorted(faces, reverse=True)[:6])
-
-        node_old, t_old = frame(old, position)
+        new.tick_id = 1  # simula animação
+        n_move, t_move = frame(new, position)
+        renderers["vulkan"].render_texture(n_move, Graphene.Rect().init(0, 0, W, H)).save_to_png(
+            str(OUT / f"p-{'jogos' if boxed else 'consoles'}-{position}-movendo.png"))
+        new.tick_id = 0
+        new.cache_key = None
+        print(f"MOVENDO {position}: python {t_move:5.2f} ms (parado {t_new:5.2f} ms, antigo {t_old:5.2f} ms)")
         tag = f"{'jogos' if boxed else 'consoles'}-{position}"
         start = time.perf_counter()
         ref = renderers["vulkan"].render_texture(node_old, Graphene.Rect().init(0, 0, W, H))

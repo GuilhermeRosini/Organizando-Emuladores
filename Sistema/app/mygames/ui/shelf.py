@@ -8,6 +8,9 @@ Desempenho:
   4.24 do Windows (rosa, embaralhado ou com frestas); retângulos recortados
   funcionam igual em todos os renderizadores. Faces de frente = uma faixa só.
 - Partes de caixas totalmente escondidas atrás da vizinha não são desenhadas.
+- Em movimento as faixas são mais largas (erro invisível com a caixa andando);
+  quando a prateleira para, o último quadro sai com a precisão total e fica
+  guardado, para não ser recalculado à toa.
 - Capas, lombadas e reflexos são preparados em threads, das caixas mais
   próximas para as mais distantes, e só ficam na memória as caixas por perto.
 - O relógio de animação só roda enquanto algo se move.
@@ -32,6 +35,7 @@ KEEP = 32  # caixas mantidas na memória de cada lado
 STRIP_ERROR = 0.3  # erro máximo (px) de posição dentro de uma faixa
 REFLECTION_ERROR = 0.6  # reflexos são apagados: podem errar um pouco mais (menos faixas)
 SIDE_REFLECTION_ERROR = 1.5  # reflexos das pilhas de lado: bem apagados e cobertos pelos da frente
+MOTION_ERROR = 5.0  # em movimento o erro pode ser 5x maior (ninguém vê): ~5x menos faixas
 MAX_STRIPS = 240
 SLOW_FRAME_US = 30_000  # quadros acima disso (≈33 fps) contam como lentos
 FILTER = Gsk.ScalingFilter.LINEAR
@@ -198,6 +202,9 @@ class Shelf(Gtk.Widget):
         self.vx = self.vy = 0.0
         self.width = 0
         self.scale = 1.0  # pixels físicos por pixel lógico (divisas das faixas caem em pixels inteiros)
+        self.moving = False  # animando ou arrastando: desenho mais leve
+        self.cache_key = None  # prateleira parada: o desenho fica guardado
+        self.cache_node = None
         self.loader = TextureLoader(self._on_loaded)
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -425,12 +432,23 @@ class Shelf(Gtk.Widget):
         native = self.get_native()
         surface = native.get_surface() if native is not None else None
         self.scale = surface.get_scale() if surface is not None and hasattr(surface, "get_scale") else self.get_scale_factor()
-        if self.reflections:
+        self.moving = bool(self.tick_id) or self.dragging
+        key = (width, height, self.position, self.reveal, self.reflections, self.scale,
+               tuple((id(entry[0]), entry[0].state, entry[0].token, entry[0].shown_aspect) for entry in entries))
+        if not self.moving and key == self.cache_key and self.cache_node is not None:
+            snapshot.append_node(self.cache_node)
+        else:
+            boxes = Gtk.Snapshot()
+            if self.reflections:
+                for entry in entries:
+                    self._draw_item(boxes, entry, floor, True)
+            hidden = self._hidden_parts(entries, floor)
             for entry in entries:
-                self._draw_item(snapshot, entry, floor, True)
-        hidden = self._hidden_parts(entries, floor) if getattr(self, "cull", True) else {}
-        for entry in entries:
-            self._draw_item(snapshot, entry, floor, False, hidden.get(id(entry[0])))
+                self._draw_item(boxes, entry, floor, False, hidden.get(id(entry[0])))
+            node = boxes.to_node()
+            if node is not None:
+                snapshot.append_node(node)
+            self.cache_key, self.cache_node = (None, None) if self.moving else (key, node)
         self._draw_caption(snapshot, width, height)
 
     def _faces(self, entry):
@@ -556,6 +574,8 @@ class Shelf(Gtk.Widget):
         face = self._screen_face(a, b, y_top, y_bottom)
         if face is None:
             return
+        if self.moving:
+            error *= MOTION_ERROR
         (ax, az), (bx, bz), screen_a, screen_b, top_a, bottom_a, top_b, bottom_b = face
         width = screen_b - screen_a
         height_a, height_b = bottom_a - top_a, bottom_b - top_b
