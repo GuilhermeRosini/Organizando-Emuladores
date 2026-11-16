@@ -121,10 +121,13 @@ for boxed in (False, True):
     new, old = build(shelf, boxed), build(shelf_old, boxed)
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
+        node_old, t_old = frame(old, position)
         new.tick_id = 1  # simula animação
         n_move, t_move = frame(new, position)
+        start = time.perf_counter()
         renderers["vulkan"].render_texture(n_move, Graphene.Rect().init(0, 0, W, H)).save_to_png(
             str(OUT / f"p-{'jogos' if boxed else 'consoles'}-{position}-movendo.png"))
+        print(f"MOVENDO render vulkan {(time.perf_counter() - start) * 1000:6.1f} ms")
         new.tick_id = 0
         new.cache_key = None
         print(f"MOVENDO {position}: python {t_move:5.2f} ms (parado {t_new:5.2f} ms, antigo {t_old:5.2f} ms)")
