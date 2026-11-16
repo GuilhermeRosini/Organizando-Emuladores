@@ -31,6 +31,7 @@ PRELOAD = 20  # caixas preparadas antes de aparecer
 KEEP = 32  # caixas mantidas na memória de cada lado
 STRIP_ERROR = 0.3  # erro máximo (px) de posição dentro de uma faixa
 REFLECTION_ERROR = 0.6  # reflexos são apagados: podem errar um pouco mais (menos faixas)
+SIDE_REFLECTION_ERROR = 1.5  # reflexos das pilhas de lado: bem apagados e cobertos pelos da frente
 MAX_STRIPS = 240
 SLOW_FRAME_US = 30_000  # quadros acima disso (≈33 fps) contam como lentos
 FILTER = Gsk.ScalingFilter.LINEAR
@@ -523,8 +524,9 @@ class Shelf(Gtk.Widget):
             if reflected:
                 texture = item.front_reflection if kind == "front" else item.spine_reflection
                 if texture is not None:
+                    error = REFLECTION_ERROR if abs(offset) < 1.5 else SIDE_REFLECTION_ERROR
                     self._quad(snapshot, texture, a, b, floor, floor + box_height * boxart.REFLECTION, None, 0,
-                               error=REFLECTION_ERROR)
+                               error=error)
             else:
                 texture = item.front if kind == "front" else item.spine
                 face_dim = dim if kind == "front" else 0
@@ -580,6 +582,8 @@ class Shelf(Gtk.Widget):
 
         vx, p, scale = self.vx, PERSPECTIVE, self.scale
         wa, dx, dz = p - az, bx - ax, bz - az
+        rect = Graphene.Rect
+        push_clip, pop = snapshot.push_clip, snapshot.pop
         x1, s1 = screen_a, 0.0
         for i in range(1, count + 1):
             x0, s0 = x1, s1
@@ -599,16 +603,16 @@ class Shelf(Gtk.Widget):
             strip = x1 - x0
             if texture is not None:
                 full = strip / max(s1 - s0, 1e-9)  # largura da imagem inteira nesta faixa
-                snapshot.push_clip(Graphene.Rect().init(x0, top - 2, strip, height + 4))
-                snapshot.append_scaled_texture(texture, FILTER, Graphene.Rect().init(x0 - s0 * full, top, full, height))
-                snapshot.pop()
+                push_clip(rect().init(x0, top - 2, strip, height + 4))
+                snapshot.append_scaled_texture(texture, FILTER, rect().init(x0 - s0 * full, top, full, height))
+                pop()
                 if shade is not None:
-                    snapshot.append_color(shade, Graphene.Rect().init(x0, top, strip, height))
+                    snapshot.append_color(shade, rect().init(x0, top, strip, height))
             else:
-                rect = Graphene.Rect().init(x0, top, strip, height)
-                snapshot.append_color(placeholder, rect)
+                band = rect().init(x0, top, strip, height)
+                snapshot.append_color(placeholder, band)
                 if shade is not None:
-                    snapshot.append_color(shade, rect)
+                    snapshot.append_color(shade, band)
 
     def _draw_caption(self, snapshot, width, height):
         """Escreve o nome e as informações da caixa selecionada embaixo dela."""

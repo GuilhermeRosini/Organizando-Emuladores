@@ -134,11 +134,13 @@ for boxed in (False, True):
         type(new)._quad = spy
         new.do_snapshot(c)
         type(new)._quad = original
-        print("CHAMADAS", c.calls, "| por face (faixas, tipo, largura, trechos escondidos):", sorted(faces, reverse=True)[:14])
+        print("CHAMADAS", c.calls, "| maiores:", sorted(faces, reverse=True)[:6])
 
         node_old, t_old = frame(old, position)
         tag = f"{'jogos' if boxed else 'consoles'}-{position}"
+        start = time.perf_counter()
         ref = renderers["vulkan"].render_texture(node_old, Graphene.Rect().init(0, 0, W, H))
+        print(f"ANTIGO render vulkan {(time.perf_counter() - start) * 1000:6.1f} ms")
         ref.save_to_png(str(OUT / f"p-{tag}-ref.png"))
         refpx = pixels(ref)
         for rname, r in renderers.items():
