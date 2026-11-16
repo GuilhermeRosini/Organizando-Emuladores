@@ -20,6 +20,31 @@ def _log_when_windowless():
         log = open(os.devnull, "w")
     sys.stdout = sys.stdout or log
     sys.stderr = sys.stderr or log
+    try:
+        import faulthandler
+
+        faulthandler.enable(log)  # se o GTK/Python travar de vez, o motivo também vai para o log
+    except (ImportError, OSError, ValueError):
+        pass
+
+
+def _log_path():
+    """Caminho do registro do hub (Sistema/logs/hub.log)."""
+    return Path(__file__).resolve().parent.parent / "logs" / "hub.log"
+
+
+def _show_fatal_error(text):
+    """Windows: mostra o erro numa janela, já que o hub roda sem terminal (pythonw)."""
+    print(text, file=sys.stderr)
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        message = f"{text}\n\nDetalhes em:\n{_log_path()}"
+        ctypes.windll.user32.MessageBoxW(None, message[-3000:], "My Games", 0x10)
+    except (AttributeError, OSError):
+        pass
 
 
 def _prepare_windows_runtime():
@@ -85,7 +110,10 @@ def main():
     # O renderizador OpenGL do GTK ("gl") foi ~3x mais rápido que o Vulkan (o
     # padrão) nos testes com placa NVIDIA. Quem quiser outro pode definir
     # GSK_RENDERER antes de abrir o hub.
-    os.environ.setdefault("GSK_RENDERER", "gl")
+    # No Windows fica o padrão do GTK, que troca sozinho de renderizador se o
+    # OpenGL não funcionar (PCs de serviço, vídeo integrado antigo, acesso remoto).
+    if sys.platform != "win32":
+        os.environ.setdefault("GSK_RENDERER", "gl")
     _log_when_windowless()
     if sys.platform == "win32":
         _prepare_windows_runtime()
@@ -97,17 +125,23 @@ def main():
         if sys.platform != "win32":
             gi.require_version("GioUnix", "2.0")  # só existe no Linux (atalhos .desktop)
     except (ImportError, ValueError) as error:
-        print(
+        _show_fatal_error(
             "O My Games precisa do GTK 4 para Python.\n"
-            "No Ubuntu/Debian: sudo apt install python3-gi gir1.2-gtk-4.0\n"
-            f"Detalhe: {error}",
-            file=sys.stderr,
+            + ("A pasta Sistema\\windows\\runtime está incompleta: baixe o hub de novo.\n"
+               if sys.platform == "win32" else "No Ubuntu/Debian: sudo apt install python3-gi gir1.2-gtk-4.0\n")
+            + f"Detalhe: {error}"
         )
         return 1
 
-    from mygames.ui.app import run
+    try:
+        from mygames.ui.app import run
 
-    return run()
+        return run()
+    except Exception:  # noqa: BLE001 - qualquer falha na abertura precisa aparecer para a pessoa
+        import traceback
+
+        _show_fatal_error("O My Games não conseguiu abrir.\n\n" + traceback.format_exc())
+        return 1
 
 
 if __name__ == "__main__":
