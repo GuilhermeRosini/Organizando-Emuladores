@@ -16,7 +16,6 @@ gi.require_version("Gsk", "4.0")
 from gi.repository import Gdk, Graphene, Gsk, Gtk  # noqa: E402
 
 from mygames.ui import boxart, shelf  # noqa: E402
-from mygames.ui.theme import theme_for  # noqa: E402
 
 W, H = 1280, 720
 
@@ -30,9 +29,25 @@ art = ROOT / "Sistema" / "app" / "assets" / "consoles" / "ps2" / "console.png"
 surf = boxart.cover_surface(art, 640)
 front = boxart.Strips(surf)
 refl = boxart.Strips(boxart.reflection(surf))
-theme = theme_for("home")
-cover = boxart.Strips(boxart.add_sheen(boxart.front_surface(theme, "PS2", "Jogo de teste", 0.71)))
-spine = boxart.Strips(boxart.spine_surface(theme, "PS2", "Jogo de teste", 0.08))
+import cairo  # noqa: E402
+
+
+def fake_box(w, h, color):
+    """Caixa de teste sem texto (o CI do Windows não tem DirectWrite)."""
+    surf2 = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, h)
+    cr = cairo.Context(surf2)
+    cr.set_source_rgb(*color)
+    cr.paint()
+    cr.set_source_rgb(1, 1, 1)
+    for i in range(0, w, 40):  # listras para ver a perspectiva
+        cr.rectangle(i, 0, 6, h)
+    cr.rectangle(0, h // 2 - 4, w, 8)
+    cr.fill()
+    return surf2
+
+
+cover = boxart.Strips(boxart.add_sheen(fake_box(400, 560, (0.1, 0.3, 0.8))))
+spine = boxart.Strips(fake_box(46, 640, (0.7, 0.1, 0.1)))
 print("faixas: frente", len(front.pieces), "lombada", len(spine.pieces))
 
 s = Gtk.Snapshot()
