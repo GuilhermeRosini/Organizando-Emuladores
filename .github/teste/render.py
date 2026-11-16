@@ -117,8 +117,8 @@ def pink(out):
     return sum(1 for i in range(0, len(raw), 4 * 97) if raw[i] > 240 and 90 < raw[i + 1] < 130 and raw[i + 2] > 160)
 
 
-for rname in ("cairo", "gl"):
-    r = Gsk.CairoRenderer() if rname == "cairo" else Gsk.GLRenderer()
+for rname in ("cairo", "vulkan"):
+    r = Gsk.CairoRenderer() if rname == "cairo" else Gsk.VulkanRenderer()
     try:
         r.realize_for_display(Gdk.Display.get_default())
     except Exception as e:  # noqa: BLE001

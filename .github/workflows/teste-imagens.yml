@@ -10,13 +10,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: OpenGL ES via ANGLE do Edge (D3D/WARP), para testar o renderizador GL
+      - name: Vulkan por software (Mesa lavapipe), mesmo motor de desenho do GL no GTK 4.24
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          F=$(find "/c/Program Files/Google/Chrome/Application" "/c/Program Files (x86)/Microsoft/Edge/Application" "/c/Program Files/Microsoft/Edge/Application" -iname libGLESv2.dll 2>/dev/null | head -1)
-          echo "ANGLE: $F"
-          D=$(dirname "$F")
-          cp "$D"/libEGL.dll "$D"/libGLESv2.dll Sistema/windows/runtime/bin/
+          gh release download -R pal1000/mesa-dist-win -p "*release-msvc.7z" -O mesa.7z
+          7z x -omesa mesa.7z > /dev/null
+          cat mesa/x64/lvp_icd.x86_64.json
       - name: Rodar teste com o Python do runtime
         shell: cmd
         run: |
@@ -24,7 +25,8 @@ jobs:
           set PYTHONHOME=
           set PYTHONPATH=
           set PYTHONUTF8=1
-          set GDK_DEBUG=gl-gles
+          set VK_DRIVER_FILES=%CD%\mesa\x64\lvp_icd.x86_64.json
+          set VK_ICD_FILENAMES=%CD%\mesa\x64\lvp_icd.x86_64.json
           Sistema\windows\runtime\bin\python.exe .github\teste\render.py
       - uses: actions/upload-artifact@v4
         if: always()
