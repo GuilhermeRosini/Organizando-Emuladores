@@ -29,7 +29,7 @@ jobs:
           set PYTHONUTF8=1
           set VK_DRIVER_FILES=%CD%\mesa\x64\lvp_icd.x86_64.json
           set VK_ICD_FILENAMES=%CD%\mesa\x64\lvp_icd.x86_64.json
-          Sistema\windows\runtime\bin\python.exe .github\teste\prateleira.py
+          Sistema\windows\runtime\bin\python.exe .github\teste\frestas.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
