@@ -121,8 +121,20 @@ for boxed in (False, True):
     for position in (2.0, 2.35, 2.5, 2.8):
         node_new, t_new = frame(new, position)
         c = Counter(Gtk.Snapshot())
+        faces = []
+        original = type(new)._quad
+
+        def spy(self, snapshot, texture, a, b, y_top, y_bottom, placeholder, dim, hidden=(), error=shelf.STRIP_ERROR):
+            before = c.calls.get("push_clip", 0)
+            original(self, snapshot, texture, a, b, y_top, y_bottom, placeholder, dim, hidden, error)
+            f = self._screen_face(a, b, y_top, y_bottom)
+            faces.append((c.calls.get("push_clip", 0) - before, "reflexo" if error != shelf.STRIP_ERROR else "face",
+                          round(f[3] - f[2]) if f else 0, len(hidden)))
+
+        type(new)._quad = spy
         new.do_snapshot(c)
-        print("CHAMADAS", c.calls)
+        type(new)._quad = original
+        print("CHAMADAS", c.calls, "| por face (faixas, tipo, largura, trechos escondidos):", sorted(faces, reverse=True)[:14])
 
         node_old, t_old = frame(old, position)
         tag = f"{'jogos' if boxed else 'consoles'}-{position}"
