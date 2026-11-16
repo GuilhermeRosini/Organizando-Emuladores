@@ -472,10 +472,14 @@ class Shelf(Gtk.Widget):
             width = x1 - x0
             if width < 0.05 or x1 < -4 or x0 > self.width + 4:
                 continue
-            rect = Graphene.Rect().init(0, 0, width + SEAM, ((bottom0 - top0) + (bottom1 - top1)) / 2)
+            # Altura média da faixa, centrada na linha do meio: o erro (mínimo) fica
+            # dividido entre a borda de cima e a de baixo.
+            height = ((bottom0 - top0) + (bottom1 - top1)) / 2
+            middle0, middle1 = (top0 + bottom0) / 2, (top1 + bottom1) / 2
+            rect = Graphene.Rect().init(0, 0, width + SEAM, height)
             snapshot.save()
-            snapshot.translate(Graphene.Point().init(x0, top0))
-            slope = (top1 - top0) / width
+            snapshot.translate(Graphene.Point().init(x0, middle0 - height / 2))
+            slope = (middle1 - middle0) / width
             if abs(slope) > 1e-5:
                 snapshot.transform(Gsk.Transform().skew(0, math.degrees(math.atan(slope))))
             if texture is not None:
