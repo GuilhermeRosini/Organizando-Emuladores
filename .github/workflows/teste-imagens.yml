@@ -18,6 +18,8 @@ jobs:
           set PYTHONPATH=
           set PYTHONUTF8=1
           Sistema\windows\runtime\bin\python.exe .github\teste\imagens.py
+          set GSK_DEBUG=fallback
+          Sistema\windows\runtime\bin\python.exe .github\teste\plano.py
           Sistema\windows\runtime\bin\python.exe .github\teste\render.py
       - uses: actions/upload-artifact@v4
         if: always()
