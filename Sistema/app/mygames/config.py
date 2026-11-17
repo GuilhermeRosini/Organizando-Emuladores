@@ -117,6 +117,20 @@ class Config:
         self.data["som_navegacao"] = bool(value)
         self.save()
 
+    @property
+    def click_volume(self):
+        """Volume do som de clique, de 0 a 100 (%)."""
+        try:
+            return max(0, min(100, int(self.data.get("volume_clique", 100))))
+        except (TypeError, ValueError):
+            return 100
+
+    @click_volume.setter
+    def click_volume(self, value):
+        """Muda o volume do som de clique e salva."""
+        self.data["volume_clique"] = max(0, min(100, int(value)))
+        self.save()
+
     # ---- Por console ---------------------------------------------------------
     def _entry(self, console_id, create=False):
         """Configuração de um console no config.json (create=True cria a entrada se não existir)."""

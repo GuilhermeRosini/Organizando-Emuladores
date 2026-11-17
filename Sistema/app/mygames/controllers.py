@@ -1,18 +1,26 @@
 """Detecção de controles e configuração automática dos emuladores.
 
-Lê o controle conectado direto do Linux (/sys/class/input), sem bibliotecas
-extras, e escreve o mapeamento certo no formato de cada emulador antes de
-abrir o jogo. Funciona com controles USB e Bluetooth (Xbox, PlayStation,
-8BitDo, genéricos...).
+Lê o controle conectado direto do sistema, sem bibliotecas extras, e escreve
+o mapeamento certo no formato de cada emulador antes de abrir o jogo.
+Funciona com controles USB e Bluetooth (Xbox, PlayStation, Switch, 8BitDo,
+genéricos...), no Linux e no Windows.
 
 Os formatos seguem o código-fonte de cada emulador:
 - PCSX2: vínculos SDL por índice ("SDL-0/FaceSouth") — servem para qualquer controle.
-- Snes9x e mGBA: SDL2 em modo joystick "cru" — o número de cada botão depende
-  do modelo, por isso é calculado a partir dos códigos evdev do controle.
-- Dolphin: backend evdev, que usa o nome do dispositivo e "Button N"/"Axis N±".
+- Snes9x e mGBA no Linux: SDL2 em modo joystick "cru" — o número de cada botão
+  depende do modelo, por isso é calculado a partir dos códigos evdev do controle.
+- Snes9x no Windows: lê os controles pelo WinMM ("(J0)Button 0", "(J0)POV Up");
+  o modelo (Xbox, PlayStation, Switch ou genérico) vem do fabricante do controle.
+- mGBA no Windows: SDL2 cru; controles tipo Xbox na seção geral e perfis
+  prontos (pelo nome que o SDL dá) para PlayStation e Switch.
+- Dolphin: Linux pelo backend evdev ("Button N"/"Axis N±"); Windows pelo
+  XInput (Xbox e compatíveis) ou pelo SDL ("Button S", "Pad N"...) para os
+  outros, com o nome exato do controle lido pelo SDL3.dll que vem com o RMG.
 - RMG: modo "Automatic" com a API de gamepad do SDL3 (independe do modelo).
+- RetroArch: perfis automáticos (autoconfig) que já vêm com ele.
 - MAME: tem mapeamento padrão para controles; só ligamos o joystick.
 """
+import ctypes
 import os
 import re
 from dataclasses import dataclass, field
@@ -267,10 +275,217 @@ def configure_snes9x_keyboard(conf):
 
 
 # ---------------------------------------------------------------------------
+# Snes9x no Windows — WinMM ("(J0)Button 0"), recalculado a cada abertura
+# ---------------------------------------------------------------------------
+SNES9X_WIN_SECTION = "Controls\\Win"
+JOY_RETURNALL, JOYCAPS_HASPOV = 0xFF, 0x10
+VENDOR_MICROSOFT, VENDOR_SONY, VENDOR_NINTENDO = 0x045E, 0x054C, 0x057E
+# Ordem dos botões pelo WinMM em cada tipo de controle (número do botão, a partir de 0).
+SNES9X_WIN_LAYOUTS = {
+    # Xbox e compatíveis: A, B, X, Y, LB, RB, Back, Start.
+    "xbox": {"south": 0, "east": 1, "west": 2, "north": 3, "l1": 4, "r1": 5, "select": 6, "start": 7},
+    # PlayStation (DualShock 4, DualSense): Quadrado, X, Círculo, Triângulo, L1, R1, L2, R2, Share, Options.
+    "playstation": {"west": 0, "south": 1, "east": 2, "north": 3, "l1": 4, "r1": 5, "select": 8, "start": 9},
+    # Switch Pro: B, A, Y, X, L, R, ZL, ZR, −, +.
+    "nintendo": {"south": 0, "east": 1, "west": 2, "north": 3, "l1": 4, "r1": 5, "select": 8, "start": 9},
+    # Genéricos (estilo PlayStation/SNES USB): 1 em cima, 2 à direita, 3 embaixo, 4 à esquerda.
+    "generic": {"north": 0, "east": 1, "south": 2, "west": 3, "l1": 4, "r1": 5, "select": 8, "start": 9},
+}
+
+
+class _JoyInfoEx(ctypes.Structure):
+    """Estado de um joystick no WinMM (JOYINFOEX)."""
+
+    _fields_ = [(name, ctypes.c_uint32) for name in (
+        "dwSize", "dwFlags", "dwXpos", "dwYpos", "dwZpos", "dwRpos", "dwUpos", "dwVpos",
+        "dwButtons", "dwButtonNumber", "dwPOV", "dwReserved1", "dwReserved2")]
+
+
+class _JoyCaps(ctypes.Structure):
+    """Capacidades de um joystick no WinMM (JOYCAPSW)."""
+
+    _fields_ = (
+        [("wMid", ctypes.c_uint16), ("wPid", ctypes.c_uint16), ("szPname", ctypes.c_uint16 * 32)]
+        + [(name, ctypes.c_uint) for name in (
+            "wXmin", "wXmax", "wYmin", "wYmax", "wZmin", "wZmax", "wNumButtons", "wPeriodMin", "wPeriodMax",
+            "wRmin", "wRmax", "wUmin", "wUmax", "wVmin", "wVmax", "wCaps", "wMaxAxes", "wNumAxes", "wMaxButtons")]
+        + [("szRegKey", ctypes.c_uint16 * 32), ("szOEMVxD", ctypes.c_uint16 * 260)]
+    )
+
+
+@dataclass
+class WinJoystick:
+    """Um controle conectado no Windows, como o WinMM (e o Snes9x) o enxerga."""
+    id: int
+    vendor: int
+    buttons: int
+    axes: int
+    pov: bool
+
+    @property
+    def kind(self):
+        """Tipo do controle, para saber a ordem dos botões: xbox, playstation, nintendo ou generic."""
+        if self.vendor == VENDOR_SONY:
+            return "playstation"
+        if self.vendor == VENDOR_NINTENDO:
+            return "nintendo"
+        # Controles XInput aparecem no WinMM com 10 botões, 5 eixos e o direcional como POV.
+        if self.vendor == VENDOR_MICROSOFT or (self.pov and self.buttons in (10, 11) and self.axes >= 5):
+            return "xbox"
+        return "generic"
+
+
+def winmm_joysticks():
+    """Windows: controles conectados agora, na numeração do WinMM (a mesma do Snes9x)."""
+    try:
+        winmm = ctypes.WinDLL("winmm")
+    except (AttributeError, OSError):  # fora do Windows não existe
+        return []
+    found = []
+    for joy_id in range(min(16, winmm.joyGetNumDevs())):
+        info = _JoyInfoEx(dwSize=ctypes.sizeof(_JoyInfoEx), dwFlags=JOY_RETURNALL)
+        if winmm.joyGetPosEx(joy_id, ctypes.byref(info)) != 0:
+            continue  # nenhum controle neste número
+        caps = _JoyCaps()
+        if winmm.joyGetDevCapsW(joy_id, ctypes.byref(caps), ctypes.sizeof(caps)) != 0:
+            continue
+        found.append(WinJoystick(joy_id, caps.wMid, caps.wNumButtons, caps.wNumAxes, bool(caps.wCaps & JOYCAPS_HASPOV)))
+    return found
+
+
+def _update_ini_keys(path, section, values=None, drop=None, separator=" = "):
+    """Troca/cria chaves de uma seção de um INI (e apaga as que drop(chave, valor) aprovar), mantendo o resto."""
+    path = Path(path)
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines() if path.exists() else []
+    pending = dict(values or {})
+    output, current, end = [], None, None
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if current == section and end is None:
+                end = len(output)
+            current = stripped[1:-1]
+            output.append(line)
+            continue
+        if current == section and "=" in line:
+            key, value = (part.strip() for part in line.split("=", 1))
+            if key in pending:
+                output.append(f"{key}{separator}{pending.pop(key)}")
+                continue
+            if drop is not None and drop(key, value):
+                continue
+        output.append(line)
+    if current == section and end is None:
+        end = len(output)
+    if pending:
+        new = [f"{key}{separator}{value}" for key, value in pending.items()]
+        if end is None:
+            if output and output[-1].strip():
+                output.append("")
+            output += [f"[{section}]"] + new
+        else:
+            while end > 0 and not output[end - 1].strip():
+                end -= 1  # antes das linhas em branco do fim da seção
+            output[end:end] = new
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
+def configure_snes9x_windows(conf, joy):
+    """Windows: liga o controle 1 do Super Nintendo ao controle do WinMM (botões na posição do SNES)."""
+    layout = dict(SNES9X_WIN_LAYOUTS[joy.kind])
+    if joy.buttons and max(layout.values()) >= joy.buttons:
+        # Controle com poucos botões: Select e Start nos dois últimos.
+        layout["select"], layout["start"] = max(0, joy.buttons - 2), max(0, joy.buttons - 1)
+    prefix = f"(J{joy.id:x})"
+    values = {"Joypad1:Enabled": "TRUE"}
+    # Posição igual ao controle do Super Nintendo: A à direita, B embaixo, X em cima, Y à esquerda.
+    for key, name in (("A", "east"), ("B", "south"), ("X", "north"), ("Y", "west"),
+                      ("L", "l1"), ("R", "r1"), ("Select", "select"), ("Start", "start")):
+        values[f"Joypad1:{key}"] = f"{prefix}Button {layout[name]}"
+    # Direcional: o POV (hat) quando existe; senão o eixo X/Y (controles que mandam o direcional como analógico).
+    directions = ("POV Up", "POV Down", "POV Left", "POV Right") if joy.pov else ("Up", "Down", "Left", "Right")
+    for key, name in zip(("Up", "Down", "Left", "Right"), directions):
+        values[f"Joypad1:{key}"] = prefix + name
+    _update_ini_keys(conf, SNES9X_WIN_SECTION, values)
+
+
+def configure_snes9x_windows_keyboard(conf):
+    """Windows sem controle: tira os vínculos de controle do jogador 1 (o Snes9x volta ao teclado padrão)."""
+    if not Path(conf).exists():
+        return
+    _update_ini_keys(conf, SNES9X_WIN_SECTION, drop=lambda key, value: key.startswith("Joypad1:")
+                     and value.startswith("(J"))
+
+
+# ---------------------------------------------------------------------------
 # mGBA — SDL2 joystick cru, recalculado a cada abertura
 # ---------------------------------------------------------------------------
+MGBA_SECTION = "gba.input.SDLB"
+MGBA_PROFILE = "gba.input-profile."
+# Direcional como hat e analógico esquerdo (eixos 0 e 1 em todo controle). Os números
+# dos hats são teclas internas do mGBA: Right=4, Left=5, Up=6, Down=7.
+MGBA_HAT_AND_STICK = {
+    "hat0Up": 6, "hat0Down": 7, "hat0Left": 5, "hat0Right": 4,
+    "axisLeftAxis": "-0", "axisRightAxis": "+0", "axisUpAxis": "-1", "axisDownAxis": "+1",
+    "axisLeftValue": -16384, "axisRightValue": 16384, "axisUpValue": -16384, "axisDownValue": 16384,
+}
+# Windows (SDL2): ordem dos botões de cada tipo de controle.
+# Xbox e compatíveis (drivers XInput/RawInput): A, B, X, Y, LB, RB, Back, Start; direcional no hat.
+MGBA_WINDOWS_XBOX = {"keyA": 1, "keyB": 0, "keyL": 4, "keyR": 5, "keySelect": 6, "keyStart": 7,
+                     "keyUp": -1, "keyDown": -1, "keyLeft": -1, "keyRight": -1}
+# PlayStation e Switch (driver HIDAPI do SDL2): ordem de gamepad do SDL — A, B, X, Y, Back,
+# Guide, Start, L3, R3, LB, RB, e o direcional como botões 11 a 14.
+MGBA_WINDOWS_HIDAPI = {"keyA": 1, "keyB": 0, "keyL": 9, "keyR": 10, "keySelect": 4, "keyStart": 6,
+                       "keyUp": 11, "keyDown": 12, "keyLeft": 13, "keyRight": 14}
+MGBA_WINDOWS_PROFILES = {
+    "PS4 Controller": MGBA_WINDOWS_HIDAPI,
+    "PS5 Controller": MGBA_WINDOWS_HIDAPI,
+    # No Switch o SDL segue as letras do controle (o A da Nintendo fica à direita, como no GBA).
+    "Nintendo Switch Pro Controller": dict(MGBA_WINDOWS_HIDAPI, keyA=0, keyB=1),
+}
+
+
+def _mgba_binding(key):
+    """A chave do config.ini do mGBA é um vínculo de botão, hat ou eixo?"""
+    return key.startswith(("key", "hat", "axis"))
+
+
+def _write_mgba(config_ini, sections):
+    """Grava as seções de controle do mGBA e limpa os vínculos dos perfis salvos de outros controles.
+
+    O mGBA guarda um perfil por nome de controle e, ao abrir, ele vale por
+    cima da seção geral. Um perfil antigo (de outro mapeamento) desfaria o
+    que o hub calculou; por isso só ficam os vínculos escritos agora. Outras
+    opções desses perfis (sensor de inclinação, giroscópio) continuam.
+    """
+    config_ini = Path(config_ini)
+    lines = config_ini.read_text(encoding="utf-8", errors="replace").splitlines() if config_ini.exists() else []
+    output, current, found = [], None, set()
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current = stripped[1:-1]
+            output.append(line)
+            if current in sections and current not in found:
+                found.add(current)
+                output += [f"{key}={value}" for key, value in sections[current].items()]
+            continue
+        controls = current is not None and (current in sections or current.startswith(MGBA_PROFILE))
+        if controls and "=" in line and _mgba_binding(line.split("=", 1)[0].strip()):
+            continue  # vínculo antigo: sai (os novos já foram escritos logo abaixo do título)
+        output.append(line)
+    for section, values in sections.items():
+        if section not in found:
+            if output and output[-1].strip():
+                output.append("")
+            output += [f"[{section}]"] + [f"{key}={value}" for key, value in values.items()]
+    config_ini.parent.mkdir(parents=True, exist_ok=True)
+    config_ini.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
 def configure_mgba(config_ini, pad):
-    """Escreve o mapeamento do controle no mGBA (botões na mesma posição do Game Boy Advance)."""
+    """Linux: escreve o mapeamento do controle no mGBA (botões na mesma posição do Game Boy Advance)."""
     layout = pad.layout
     values = {}
 
@@ -285,13 +500,21 @@ def configure_mgba(config_ini, pad):
         values[key] = button(name)
     for key, name in (("keyUp", "up"), ("keyDown", "down"), ("keyLeft", "left"), ("keyRight", "right")):
         values[key] = button(name)
-    # Direcional como hat (números = teclas internas do mGBA: Right=4, Left=5, Up=6, Down=7).
-    values.update(hat0Up=6, hat0Down=7, hat0Left=5, hat0Right=4)
+    values.update({key: value for key, value in MGBA_HAT_AND_STICK.items() if key.startswith("hat")})
     if "lx" in layout:
         x, y = pad.sdl_axis(layout["lx"]), pad.sdl_axis(layout["ly"])
         values.update(axisLeftAxis=f"-{x}", axisRightAxis=f"+{x}", axisUpAxis=f"-{y}", axisDownAxis=f"+{y}",
                       axisLeftValue=-16384, axisRightValue=16384, axisUpValue=-16384, axisDownValue=16384)
-    _set_ini_section(config_ini, "gba.input.SDLB", list(values.items()), separator="=")
+    # A seção geral e o perfil com o nome do controle (com o SDL em modo cru, é o nome do Linux).
+    _write_mgba(config_ini, {MGBA_SECTION: values, MGBA_PROFILE + pad.name: values})
+
+
+def configure_mgba_windows(config_ini):
+    """Windows: controles tipo Xbox na seção geral e perfis prontos para PlayStation e Switch."""
+    sections = {MGBA_SECTION: {**MGBA_WINDOWS_XBOX, **MGBA_HAT_AND_STICK}}
+    for name, buttons in MGBA_WINDOWS_PROFILES.items():
+        sections[MGBA_PROFILE + name] = {**buttons, **MGBA_HAT_AND_STICK}
+    _write_mgba(config_ini, sections)
 
 
 # ---------------------------------------------------------------------------
@@ -337,22 +560,27 @@ def restore_dolphin_keyboard(config_dir):
     if not pad_ini.exists():
         return
     text = pad_ini.read_text(encoding="utf-8", errors="replace")
-    # Remove só o que o hub escreveu (Linux: evdev; Windows: XInput), nunca um ajuste manual.
-    if "Device = evdev/" in text or "Device = XInput/" in text:
+    # Remove só o que o hub escreveu (Linux: evdev; Windows: XInput ou SDL), nunca um ajuste manual.
+    if any(f"Device = {source}/" in text for source in ("evdev", "XInput", "SDL")):
         pad_ini.unlink()
 
 
-def configure_dolphin_xinput(config_dir):
-    """Windows: liga o controle 1 do GameCube ao controle XInput 1 (Xbox e compatíveis).
+def configure_dolphin_xinput(config_dir, sdl_name=None):
+    """Windows: liga o controle 1 do GameCube ao controle XInput 1 (Xbox e compatíveis) ou a um controle do SDL.
 
     Os nomes ("Button A", "Left X+"...) são os que o próprio Dolphin usa para XInput.
+    O backend SDL do Dolphin usa os mesmos nomes para analógicos, gatilhos,
+    ombros e direcional; só os botões de face mudam ("Button S/E/W/N", pela
+    posição). sdl_name é o nome exato que o SDL dá ao controle (ex.: "PS5 Controller").
     Sem controle conectado o Dolphin simplesmente não recebe nada dele; o teclado
     continua disponível pelo menu do Dolphin.
     """
+    face = ("Button S", "Button E", "Button W", "Button N") if sdl_name else (
+        "Button A", "Button B", "Button X", "Button Y")
     values = [
-        ("Device", "XInput/0/Gamepad"),
-        ("Buttons/A", "`Button A`"), ("Buttons/B", "`Button B`"), ("Buttons/X", "`Button X`"),
-        ("Buttons/Y", "`Button Y`"), ("Buttons/Z", "`Shoulder R`"), ("Buttons/Start", "`Start`"),
+        ("Device", f"SDL/0/{sdl_name}" if sdl_name else "XInput/0/Gamepad"),
+        ("Buttons/A", f"`{face[0]}`"), ("Buttons/B", f"`{face[1]}`"), ("Buttons/X", f"`{face[2]}`"),
+        ("Buttons/Y", f"`{face[3]}`"), ("Buttons/Z", "`Shoulder R`"), ("Buttons/Start", "`Start`"),
         ("Main Stick/Up", "`Left Y+`"), ("Main Stick/Down", "`Left Y-`"),
         ("Main Stick/Left", "`Left X-`"), ("Main Stick/Right", "`Left X+`"),
         ("Main Stick/Calibration", "100.00 141.42 100.00 141.42 100.00 141.42 100.00 141.42"),
@@ -365,6 +593,57 @@ def configure_dolphin_xinput(config_dir):
         ("Rumble/Motor", "`Motor L | Motor R`"),
     ]
     _set_ini_section(config_dir / "GCPadNew.ini", "GCPad1", values)
+
+
+def xinput_connected():
+    """Windows: há algum controle XInput (Xbox ou compatível) conectado agora?"""
+    for name in ("xinput1_4", "xinput1_3", "xinput9_1_0"):
+        try:
+            dll = ctypes.WinDLL(name)
+        except (AttributeError, OSError):
+            continue
+        state = (ctypes.c_ubyte * 16)()  # XINPUT_STATE
+        return any(dll.XInputGetState(slot, ctypes.byref(state)) == 0 for slot in range(4))
+    return False
+
+
+SDL_INIT_GAMEPAD = 0x2000
+_sdl3_libraries = {}
+
+
+def sdl3_gamepad_names(library):
+    """Nomes dos controles conectados como o SDL3 os vê, na ordem em que foram conectados.
+
+    É o mesmo nome que o Dolphin usa no backend SDL ("SDL/0/<nome>"). `library`
+    é um SDL3 (SDL3.dll que vem com o RMG no Windows). Se algo falhar, lista vazia.
+    """
+    try:
+        sdl = _sdl3_libraries.get(str(library))
+        if sdl is None:
+            sdl = ctypes.CDLL(str(library))
+            sdl.SDL_Init.argtypes, sdl.SDL_Init.restype = [ctypes.c_uint32], ctypes.c_bool
+            sdl.SDL_GetGamepads.argtypes = [ctypes.POINTER(ctypes.c_int)]
+            sdl.SDL_GetGamepads.restype = ctypes.POINTER(ctypes.c_uint32)
+            sdl.SDL_GetGamepadNameForID.argtypes = [ctypes.c_uint32]
+            sdl.SDL_GetGamepadNameForID.restype = ctypes.c_char_p
+            sdl.SDL_free.argtypes = [ctypes.c_void_p]
+            _sdl3_libraries[str(library)] = sdl
+        if not sdl.SDL_Init(SDL_INIT_GAMEPAD):
+            return []
+    except (OSError, AttributeError):
+        return []
+    try:
+        count = ctypes.c_int()
+        ids = sdl.SDL_GetGamepads(ctypes.byref(count))
+        if not ids:
+            return []
+        try:
+            names = [sdl.SDL_GetGamepadNameForID(ids[i]) for i in range(count.value)]
+        finally:
+            sdl.SDL_free(ids)
+        return [name.decode("utf-8", "replace") for name in names if name]
+    finally:
+        sdl.SDL_Quit()
 
 
 # ---------------------------------------------------------------------------

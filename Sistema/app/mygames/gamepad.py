@@ -5,7 +5,8 @@ Windows: lê os controles pela API XInput (classe XInputGamepads), a mesma
 usada pelos jogos para controles de Xbox e compatíveis.
 
 Não depende de bibliotecas extras. Direcional ou analógico esquerdo navegam,
-botão A/X confirma, B/Círculo volta e LB/RB trocam de console.
+botão A/X confirma e B/Círculo volta. LB/RB só fazem algo se on_tab for
+informado (o hub não usa: a troca de console é sempre pela tela Início).
 """
 import array
 import ctypes

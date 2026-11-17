@@ -24,34 +24,23 @@ label { color: @ink; }
 }
 .brand-line { font-size: 10px; font-weight: 800; letter-spacing: 3px; color: @ink_dim; margin-top: 2px; }
 
-.tabs {
+button.home-pill {
   background-color: @glass;
   border: 1px solid @stroke;
   border-radius: 999px;
-  padding: 4px;
+  padding: 7px 20px;
   margin-top: 6px;
-}
-button.tab {
-  background: transparent;
-  border: none;
-  border-radius: 999px;
-  padding: 5px 15px;
   min-height: 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: @ink_dim;
+  font-size: 14px;
+  font-weight: 800;
   box-shadow: none;
   transition: background-color 180ms ease, color 180ms ease;
 }
-button.tab label { color: inherit; }
-button.tab:hover { background-color: rgba(255, 255, 255, 0.10); color: @ink; }
-button.tab.active { background-color: #ffffff; }
-button.tab.active label { color: #0b0f19; }
+button.home-pill:hover { background-color: #ffffff; }
+button.home-pill:hover label,
+button.home-pill:hover image { color: #0b0f19; }
 
 .status-icon { color: @ink_dim; }
-.date { font-size: 14px; font-weight: 700; color: @ink_dim; }
-.clock { font-size: 16px; font-weight: 900; }
-.position { font-size: 15px; font-weight: 900; letter-spacing: 2px; }
 button.menu-pill {
   background-color: @glass;
   border: 1px solid @stroke;

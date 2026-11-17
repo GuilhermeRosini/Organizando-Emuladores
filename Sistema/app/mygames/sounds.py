@@ -8,7 +8,11 @@ Como toca:
   tocando silêncio, e cada clique entra nele, para o som sair sempre e na hora.
 - Windows: winsound, que já vem no Python do runtime.
 Se nada disso existir, o hub simplesmente fica sem som (nunca dá erro).
+
+Volume (Configurações, 0 a 100%): no Linux o som na memória é recalculado; no
+Windows (winsound só toca arquivos) é gerado um .wav por volume, no cache.
 """
+import array
 import math
 import random
 import struct
@@ -43,12 +47,19 @@ def _click_samples():
     return samples
 
 
-def click_file():
-    """Caminho do click.wav no cache (gera se ainda não existir)."""
-    path = CACHE_DIR / f"click-v{VERSION}.wav"
+def gain(percent):
+    """Volume em % -> multiplicador do som (curva que o ouvido percebe como linear: 50% soa pela metade)."""
+    return (max(0, min(100, percent)) / 100) ** 2
+
+
+def click_file(percent=100):
+    """Caminho do clique no cache, no volume pedido (gera se ainda não existir)."""
+    percent = max(0, min(100, int(percent)))
+    path = CACHE_DIR / (f"click-v{VERSION}.wav" if percent == 100 else f"click-v{VERSION}-vol{percent}.wav")
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = b"".join(struct.pack("<h", int(max(-1, min(1, s)) * 32767)) for s in _click_samples())
+        factor = gain(percent)
+        data = b"".join(struct.pack("<h", int(max(-1, min(1, s * factor)) * 32767)) for s in _click_samples())
         temporary = path.with_suffix(".part")
         with wave.open(str(temporary), "wb") as output:
             output.setnchannels(1)
@@ -83,7 +94,8 @@ class _GstPlayer:
         with wave.open(str(path), "rb") as source:
             rate = source.getframerate()
             channels = source.getnchannels()
-            self.data = source.readframes(source.getnframes())
+            self.original = source.readframes(source.getnframes())
+        self.data = self.original
 
         frames = int(rate * self.CHUNK_SECONDS)
         self.chunk_bytes = frames * channels * 2
@@ -146,6 +158,15 @@ class _GstPlayer:
         with self.lock:
             self.offset = 0
 
+    def set_volume(self, percent):
+        """Recalcula o clique na memória no volume pedido (0 a 100%)."""
+        factor = gain(percent)
+        samples = array.array("h", self.original)
+        for index, value in enumerate(samples):
+            samples[index] = int(value * factor)
+        with self.lock:
+            self.data = samples.tobytes()
+
     def close(self):
         """Libera o áudio ao fechar o hub."""
         self.pipeline.set_state(self.Gst.State.NULL)
@@ -166,6 +187,10 @@ class _WindowsPlayer:
         flags = self.winsound.SND_FILENAME | self.winsound.SND_ASYNC | self.winsound.SND_NODEFAULT
         self.winsound.PlaySound(self.path, flags)
 
+    def set_volume(self, percent):
+        """Passa a tocar o arquivo do clique no volume pedido (gerado no cache na primeira vez)."""
+        self.path = str(click_file(percent))
+
     def close(self):
         """Nada a liberar no Windows."""
 
@@ -173,9 +198,10 @@ class _WindowsPlayer:
 class ClickSound:
     """O som de navegação do hub. Use click() a cada caixa que passa."""
 
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, volume=100):
         """Prepara o tocador numa thread, para não atrasar a abertura do hub."""
         self.enabled = enabled
+        self.volume = volume  # 0 a 100 (%)
         self.player = None  # fica pronto em instantes; até lá, cliques são ignorados
         self.last = 0.0
         threading.Thread(target=self._load, daemon=True).start()
@@ -184,13 +210,25 @@ class ClickSound:
         """Gera o som e abre o tocador (se falhar, o hub fica sem som)."""
         try:
             path = click_file()
-            self.player = _WindowsPlayer(path) if IS_WINDOWS else _GstPlayer(path)
+            player = _WindowsPlayer(path) if IS_WINDOWS else _GstPlayer(path)
+            if self.volume != 100:
+                player.set_volume(self.volume)
+            self.player = player
         except Exception as error:  # noqa: BLE001 - som é opcional
             print(f"Aviso (som): {error}", file=sys.stderr)
 
+    def set_volume(self, percent):
+        """Muda o volume do clique (0 a 100%)."""
+        self.volume = max(0, min(100, int(percent)))
+        if self.player is not None:
+            try:
+                self.player.set_volume(self.volume)
+            except Exception as error:  # noqa: BLE001 - som é opcional
+                print(f"Aviso (volume): {error}", file=sys.stderr)
+
     def click(self):
-        """Toca o clique (ignora se estiver desligado ou se veio rápido demais)."""
-        if not self.enabled or self.player is None:
+        """Toca o clique (ignora se estiver desligado, mudo ou se veio rápido demais)."""
+        if not self.enabled or self.player is None or self.volume <= 0:
             return
         now = time.monotonic()
         if now - self.last < MIN_INTERVAL:

@@ -25,7 +25,6 @@ from .theme import TAB_NAMES, rgb, theme_for
 from .widgets import open_folder, run_in_thread
 
 STYLE = Path(__file__).with_name("style.css")
-TABS = ["home"] + [console.id for console in CONSOLE_LIST]
 BOOT_SECONDS = 1.6
 
 
@@ -72,7 +71,7 @@ class MyGamesApp:
             self.config = Config.__new__(Config)
             self.config.data = {"tela_cheia": True, "consoles": {}}
             self.config_error = str(error)
-        self.sound = ClickSound(self.config.click_sound)  # clique ao passar pelas caixas
+        self.sound = ClickSound(self.config.click_sound, self.config.click_volume)  # clique ao passar pelas caixas
         threading.Thread(target=self._cover_worker, daemon=True).start()
 
     # ---- Construção ----------------------------------------------------------
@@ -126,7 +125,6 @@ class MyGamesApp:
             is_enabled=self._accepts_input,
             on_change=self._on_pad_change,
             on_exit_combo=self._exit_game_from_pad,
-            on_tab=self.cycle_tab,
         )
         self._on_pad_change(self.gamepads.connected)
 
@@ -140,8 +138,6 @@ class MyGamesApp:
             self._light_mode(software=True)
         self.switch_tab("home")
         self.shelf.grab_focus()
-        self._update_clock()
-        GLib.timeout_add_seconds(15, self._update_clock)
         self._count_all_games()
         if self.config_error:
             self.toast(self.config_error, error=True)
@@ -167,12 +163,13 @@ class MyGamesApp:
         main.append(self._build_topbar())
         self.shelf = Shelf(self._on_shelf_selected, self._on_shelf_activate, self._on_slow_frames)
         self.shelf.on_step = self.sound.click
+        self.shelf.on_badge = lambda: (self.sound.click(), self.switch_tab("home"))
         main.append(self.shelf)
         main.append(self._build_hints())
         return main
 
     def _build_topbar(self):
-        """Barra do topo: nome do console, abas, relógio, contador e botão Menu."""
+        """Barra do topo: nome do console, botão Início, ícone do controle e botão Menu."""
         handle = Gtk.WindowHandle()
         bar = Gtk.CenterBox()
         bar.add_css_class("topbar")
@@ -190,37 +187,25 @@ class MyGamesApp:
         brand.append(self.count_label)
         bar.set_start_widget(brand)
 
-        tabs = Gtk.Box(valign=Gtk.Align.START, halign=Gtk.Align.CENTER)
-        tabs.add_css_class("tabs")
-        self.tab_buttons = {}
-        for key in TABS:
-            button = Gtk.Button(label=TAB_NAMES.get(key, key))
-            button.add_css_class("tab")
-            button.set_focusable(False)
-            button.connect("clicked", lambda _b, k=key: (self.sound.click(), self.switch_tab(k)))
-            tabs.append(button)
-            self.tab_buttons[key] = button
-        bar.set_center_widget(tabs)
+        # Só um botão para voltar aos consoles: a troca de console é sempre pela tela Início.
+        self.home_button = Gtk.Button(valign=Gtk.Align.START, halign=Gtk.Align.CENTER)
+        self.home_button.add_css_class("home-pill")
+        self.home_button.set_focusable(False)
+        self.home_button.set_tooltip_text("Voltar para os consoles")
+        home_content = Gtk.Box(spacing=8)
+        home_content.append(Gtk.Image.new_from_icon_name("go-home-symbolic"))
+        home_content.append(Gtk.Label(label="Início"))
+        self.home_button.set_child(home_content)
+        self.home_button.connect("clicked", lambda *_: (self.sound.click(), self.switch_tab("home")))
+        bar.set_center_widget(self.home_button)
 
-        side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, halign=Gtk.Align.END, valign=Gtk.Align.START)
-        status = Gtk.Box(spacing=14, halign=Gtk.Align.END)
+        # Canto direito limpo: ícone do controle (quando conectado), botão Menu e os botões da janela.
+        status = Gtk.Box(spacing=14, halign=Gtk.Align.END, valign=Gtk.Align.START)
         self.pad_icon = Gtk.Image.new_from_icon_name("input-gaming-symbolic")
         self.pad_icon.set_tooltip_text("Controle conectado")
         self.pad_icon.add_css_class("status-icon")
         status.append(self.pad_icon)
-        self.date_label = Gtk.Label()
-        self.date_label.add_css_class("date")
-        status.append(self.date_label)
-        self.time_label = Gtk.Label()
-        self.time_label.add_css_class("clock")
-        status.append(self.time_label)
-        self.window_controls = Gtk.WindowControls(side=Gtk.PackType.END)
-        status.append(self.window_controls)
-        side.append(status)
-        self.position_label = Gtk.Label(xalign=1, halign=Gtk.Align.END)
-        self.position_label.add_css_class("position")
-        side.append(self.position_label)
-        menu = Gtk.Button(halign=Gtk.Align.END)
+        menu = Gtk.Button(valign=Gtk.Align.CENTER)
         menu.add_css_class("menu-pill")
         menu.set_focusable(False)
         menu.set_tooltip_text("Configurações")
@@ -229,8 +214,10 @@ class MyGamesApp:
         menu_content.append(Gtk.Label(label="Menu"))
         menu.set_child(menu_content)
         menu.connect("clicked", lambda *_: self.show_settings(self.tab if self.tab in CONSOLES else None))
-        side.append(menu)
-        bar.set_end_widget(side)
+        status.append(menu)
+        self.window_controls = Gtk.WindowControls(side=Gtk.PackType.END)
+        status.append(self.window_controls)
+        bar.set_end_widget(status)
         return handle
 
     def _build_hints(self):
@@ -250,7 +237,6 @@ class MyGamesApp:
         confirm = "Abrir" if self.tab == "home" else "Jogar"
         if pad:
             entries = [
-                ([("LB", "bumper"), ("RB", "bumper")], "Console"),
                 ([("◀▶", "dpad")], "Navegar"),
                 ([("A", "btn-a")], confirm),
                 ([("B", "btn-b")], "Início"),
@@ -259,7 +245,6 @@ class MyGamesApp:
             ]
         else:
             entries = [
-                ([("Q", "key"), ("E", "key")], "Console"),
                 ([("←", "key"), ("→", "key")], "Navegar"),
                 ([("Enter", "key")], confirm),
                 ([("Esc", "key")], "Início"),
@@ -492,11 +477,6 @@ class MyGamesApp:
         return next((i for i, item in enumerate(items) if item.payload[0] == "game"), 0)
 
     # ---- Abas ----------------------------------------------------------------
-    def cycle_tab(self, step):
-        """Vai para a aba anterior/seguinte (Q/E, LB/RB)."""
-        self.sound.click()
-        self.switch_tab(TABS[(TABS.index(self.tab) + step) % len(TABS)])
-
     def switch_tab(self, key):
         """Troca de aba: cor do fundo, caixas da prateleira e textos do topo."""
         if self.shelf.items:
@@ -504,12 +484,13 @@ class MyGamesApp:
         self._close_search()
         self.tab = key
         self.backdrop.set_theme(key)
-        for name, button in self.tab_buttons.items():
-            (button.add_css_class if name == key else button.remove_css_class)("active")
+        self.home_button.set_visible(key != "home")
         self._refresh_hints()
         if key == "home":
+            self.shelf.clear_badge()
             items = self.items.get("home") or self._home_items()
-            self.shelf.set_items(items, self.selection.get("home", 0))
+            # Consoles numa roda sem fim: depois do último volta o primeiro.
+            self.shelf.set_items(items, self.selection.get("home", 0), loop=True)
         else:
             console = CONSOLES[key]
             items = self.items.get(key)
@@ -565,7 +546,7 @@ class MyGamesApp:
         run_in_thread(work, done)
 
     def _refresh_topbar(self):
-        """Atualiza o nome do console, o tipo, a contagem de jogos e o contador "3 / 12"."""
+        """Atualiza o nome do console, o tipo e a contagem de jogos."""
         if self.tab == "home":
             self.wordmark.set_text("MY GAMES")
             self.kind_label.set_text("HUB DE EMULAÇÃO")
@@ -576,8 +557,6 @@ class MyGamesApp:
             self.wordmark.set_text(TAB_NAMES.get(console.id, console.short).upper())
             self.kind_label.set_text(theme_for(console.id).kind)
             self.count_label.set_text(self._games_text(self.game_counts.get(console.id)).upper())
-        items = self.shelf.items
-        self.position_label.set_text(f"{self.shelf.index + 1} / {len(items)}" if items else "")
 
     def _on_slow_frames(self):
         """O computador não acompanhou a animação: desliga os efeitos mais pesados."""
@@ -593,13 +572,6 @@ class MyGamesApp:
         if software:
             self.shelf.visible = 7
         self.shelf.queue_draw()
-
-    def _update_clock(self):
-        """Atualiza a data e a hora do topo."""
-        now = GLib.DateTime.new_now_local()
-        self.date_label.set_text(now.format("%a, %d %b").capitalize())
-        self.time_label.set_text(now.format("%H:%M"))
-        return GLib.SOURCE_CONTINUE
 
     # ---- Capas ---------------------------------------------------------------
     def _cover_worker(self):
@@ -657,17 +629,19 @@ class MyGamesApp:
 
     # ---- Navegação -----------------------------------------------------------
     def _on_shelf_selected(self, _index):
-        """A seleção da prateleira mudou: atualiza o contador do topo."""
-        if self.window is not None:
-            self._refresh_topbar()
+        """A seleção da prateleira mudou (o topo não mostra mais a posição: nada a atualizar)."""
 
     def _on_shelf_activate(self, item):
         """Clicou/confirmou uma caixa: abre o console, o jogo, o emulador, a pasta ou as configurações."""
         kind, value = item.payload
-        self.sound.click()
         if kind == "console":
+            # O console encolhe até o canto enquanto os jogos aparecem.
+            self.sound.click()
+            self.shelf.dock_badge(item)
             self.switch_tab(value.id)
-        elif kind == "game":
+            return
+        self.sound.click()
+        if kind == "game":
             self.launch(CONSOLES[self.tab], value.path, item)
         elif kind == "emulator":
             self.launch(CONSOLES[self.tab], None, item)
@@ -753,7 +727,7 @@ class MyGamesApp:
             self._rescan(console)
 
     def _on_key(self, _controller, keyval, _keycode, state):
-        """Teclado: setas, Enter, Esc, Q/E, Home/End, /, M e F11."""
+        """Teclado: setas, Enter, Esc, Home/End, /, M e F11."""
         if self.pages.get_visible_child_name() == "boot":
             return True
         searching = self.search.has_focus() or self.search_revealer.get_reveal_child()
@@ -765,10 +739,6 @@ class MyGamesApp:
             self.activate_selected()
         elif keyval == Gdk.KEY_Escape:
             self.go_home()
-        elif keyval in (Gdk.KEY_Page_Up, Gdk.KEY_ISO_Left_Tab) or (keyval in (Gdk.KEY_q, Gdk.KEY_Q) and not searching):
-            self.cycle_tab(-1)
-        elif keyval in (Gdk.KEY_Page_Down, Gdk.KEY_Tab) or (keyval in (Gdk.KEY_e, Gdk.KEY_E) and not searching):
-            self.cycle_tab(1)
         elif keyval == Gdk.KEY_Home:
             self.shelf.select(0)
         elif keyval == Gdk.KEY_End:

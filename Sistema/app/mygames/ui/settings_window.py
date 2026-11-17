@@ -1,4 +1,5 @@
 """Janela de configurações: emuladores, pastas de jogos e preferências."""
+import time
 from pathlib import Path
 
 from gi.repository import GLib, Gtk, Pango
@@ -74,7 +75,7 @@ class SettingsWindow(Gtk.Window):
 
     # ---- Geral ---------------------------------------------------------------
     def _general_card(self):
-        """Cartão geral: tela cheia nos emuladores, som de clique, atalho no menu e pasta do hub."""
+        """Cartão geral: tela cheia nos emuladores, som de clique e volume, atalho no menu e pasta do hub."""
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         card.add_css_class("card")
 
@@ -96,6 +97,26 @@ class SettingsWindow(Gtk.Window):
         sound = Gtk.Switch(active=self.app.config.click_sound, valign=Gtk.Align.CENTER)
         sound.connect("notify::active", self._on_click_sound)
         row.append(sound)
+        card.append(row)
+
+        row = Gtk.Box(spacing=12)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        texts.append(_label("Volume do clique", "card-title"))
+        texts.append(_label("Deixa o som de navegação mais alto ou mais baixo.", "note"))
+        row.append(texts)
+        self.volume_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+        self.volume_scale.set_value(self.app.config.click_volume)
+        self.volume_scale.set_valign(Gtk.Align.CENTER)
+        self.volume_scale.set_size_request(240, -1)
+        self.volume_scale.set_draw_value(True)
+        self.volume_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        if hasattr(self.volume_scale, "set_format_value_func"):
+            self.volume_scale.set_format_value_func(lambda _scale, value: f"{value:.0f}%")
+        self.volume_scale.set_sensitive(self.app.config.click_sound)
+        self.volume_scale.connect("value-changed", self._on_click_volume)
+        self.volume_preview = 0.0
+        self.volume_save = 0
+        row.append(self.volume_scale)
         card.append(row)
 
         row = Gtk.Box(spacing=12, visible=not IS_WINDOWS)  # atalho do menu: só no Linux
@@ -141,12 +162,34 @@ class SettingsWindow(Gtk.Window):
     def _on_click_sound(self, switch, _param):
         """Liga/desliga o som de clique da prateleira."""
         self.app.sound.enabled = switch.get_active()
+        self.volume_scale.set_sensitive(switch.get_active())
         if switch.get_active():
             self.app.sound.click()  # amostra do som ao ligar
         try:
             self.app.config.click_sound = switch.get_active()
         except ConfigError as error:
             self.general_status.set_text(str(error))
+
+    def _on_click_volume(self, scale):
+        """Muda o volume do clique na hora (com uma amostra) e salva logo depois de soltar."""
+        volume = round(scale.get_value())
+        self.app.sound.set_volume(volume)
+        now = time.monotonic()
+        if now - self.volume_preview > 0.12:  # arrastando: uma amostra a cada ~120 ms
+            self.volume_preview = now
+            self.app.sound.click()
+        if self.volume_save:
+            GLib.source_remove(self.volume_save)
+        self.volume_save = GLib.timeout_add(400, self._save_click_volume, volume)
+
+    def _save_click_volume(self, volume):
+        """Grava o volume no config.json (uma vez, depois que o controle parou de mexer)."""
+        self.volume_save = 0
+        try:
+            self.app.config.click_volume = volume
+        except ConfigError as error:
+            self.general_status.set_text(str(error))
+        return GLib.SOURCE_REMOVE
 
     def _on_shortcut(self, _button):
         """Cria o atalho do My Games no menu de aplicativos."""

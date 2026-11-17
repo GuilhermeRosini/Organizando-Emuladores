@@ -168,15 +168,21 @@ class PCSX2(Profile):
 
 
 class Snes9x(Profile):
-    """Super Nintendo (Snes9x): controle reconfigurado a cada abertura (Linux).
+    """Super Nintendo (Snes9x): controle reconfigurado a cada abertura.
 
-    No Windows o Snes9x já é portátil (snes9x.conf ao lado do .exe); o controle
-    é configurado uma vez pelo menu do próprio Snes9x.
+    No Windows o Snes9x já é portátil (snes9x.conf ao lado do .exe) e lê os
+    controles pelo WinMM; no Linux, pelo SDL2.
     """
 
     def prepare(self, data_dir, console, program):
         """Configura o controle conectado (ou volta para o teclado se não houver)."""
         if IS_WINDOWS:
+            conf = Path(program).parent / "snes9x.conf"
+            joysticks = controllers.winmm_joysticks()
+            if joysticks:
+                controllers.configure_snes9x_windows(conf, joysticks[0])
+            else:
+                controllers.configure_snes9x_windows_keyboard(conf)
             return
         conf = data_dir / "config" / "snes9x" / "snes9x.conf"
         pads = controllers.gamepads()
@@ -191,7 +197,7 @@ class Snes9x(Profile):
 
 
 class MGBA(Profile):
-    """Game Boy Advance (mGBA): controle reconfigurado a cada abertura (Linux); portátil no Windows."""
+    """Game Boy Advance (mGBA): controle reconfigurado a cada abertura; portátil no Windows."""
 
     def arguments(self, game, fullscreen, data_dir, program):
         """Abre o jogo, em tela cheia se configurado (-f)."""
@@ -200,16 +206,21 @@ class MGBA(Profile):
         return (["-f"] if fullscreen else []) + [str(game)]
 
     def prepare(self, data_dir, console, program):
-        """Configura o controle conectado (Linux) ou liga o modo portátil (Windows)."""
+        """Configura o controle conectado (Linux) ou o modo portátil e os perfis de controle (Windows)."""
         if IS_WINDOWS:
             _mark_portable(program, "portable.ini")
+            controllers.configure_mgba_windows(Path(program).parent / "config.ini")
             return
         pads = controllers.gamepads()
         if pads:
             controllers.configure_mgba(data_dir / "config" / "mgba" / "config.ini", pads[0])
 
     def environment(self):
-        """Usa o modo joystick cru do SDL para bater com o mapeamento calculado."""
+        """Linux: modo joystick cru do SDL. Windows: controles Xbox fora do driver HIDAPI (ordem fixa)."""
+        if IS_WINDOWS:
+            # Assim todo controle tipo Xbox chega ao mGBA na ordem do XInput (a da seção geral).
+            return {"SDL_JOYSTICK_HIDAPI_XBOX": "0", "SDL_JOYSTICK_HIDAPI_XBOX_360": "0",
+                    "SDL_JOYSTICK_HIDAPI_XBOX_ONE": "0"}
         return RAW_SDL_ENV
 
 
@@ -231,10 +242,19 @@ class Dolphin(Profile):
         return arguments
 
     def prepare(self, data_dir, console, program):
-        """Configura o controle conectado (XInput no Windows, evdev no Linux) ou volta para o teclado."""
+        """Configura o controle conectado (XInput ou SDL no Windows, evdev no Linux) ou volta para o teclado."""
         config_dir = data_dir / "dolphin" / "Config"
         if IS_WINDOWS:
-            controllers.configure_dolphin_xinput(config_dir)
+            name = None
+            if not controllers.xinput_connected():
+                # PlayStation, Switch e outros: o nome exato que o SDL do Dolphin vai mostrar,
+                # lido pelo SDL3.dll que vem com o emulador de outro console (o RMG).
+                for library in sorted(console.emulator_dir.parent.glob(f"*/{WINDOWS_EMULATOR_FOLDER}/SDL3.dll")):
+                    names = controllers.sdl3_gamepad_names(library)
+                    if names:
+                        name = names[0]
+                        break
+            controllers.configure_dolphin_xinput(config_dir, name)
             return
         pads = controllers.gamepads()
         if pads:

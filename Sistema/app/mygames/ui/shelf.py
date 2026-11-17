@@ -18,6 +18,10 @@ Desempenho:
 - Capas, lombadas e reflexos são preparados em threads, das caixas mais
   próximas para as mais distantes, e só ficam na memória as caixas por perto.
 - O relógio de animação só roda enquanto algo se move.
+- Roda sem fim (tela Início): a seleção e a posição ficam sempre entre 0 e o
+  número de itens. Ao passar do último para o primeiro, a posição é deslocada
+  de uma volta inteira (a imagem na tela é a mesma), então nada cresce e não há
+  caixas a mais na memória: só se desenham as poucas que cabem na tela.
 """
 import itertools
 import math
@@ -44,6 +48,10 @@ MOTION_ERROR = 5.0  # em movimento o erro pode ser 5x maior (ninguém vê): ~5x 
 MAX_STRIPS = 240
 SLOW_FRAME_US = 30_000  # quadros acima disso (≈33 fps) contam como lentos
 FILTER = Gsk.ScalingFilter.LINEAR
+BADGE_SECONDS = 0.65  # o console encolhe e vai para o canto ao entrar nele
+BADGE_HEIGHT = 0.16  # tamanho final do console no canto (fração da altura da prateleira)
+BADGE_WIDTH = 0.13  # ... e no máximo esta fração da largura
+BADGE_MARGIN = 26  # px até as bordas
 
 EMPTY, QUEUED, READY = 0, 1, 2
 
@@ -243,6 +251,7 @@ class Shelf(Gtk.Widget):
         self.position = 0.0
         self.reveal = 1.0  # entrada suave ao trocar de console
         self.reflections = True
+        self.loop = False  # roda sem fim: depois do último item vem o primeiro
         self.visible = VISIBLE  # caixas desenhadas de cada lado (menos no modo leve)
         self.tick_id = 0
         self.last_time = 0
@@ -259,6 +268,14 @@ class Shelf(Gtk.Widget):
         self.unit = Graphene.Rect().init(0, 0, UNIT, UNIT)
         self.cache_key = None  # prateleira parada: o desenho fica guardado
         self.cache_node = None
+        # Console em que se entrou, pequeno no canto de baixo à esquerda (clicar volta ao Início).
+        self.badge = None  # (frente, contorno, retângulo de onde saiu)
+        self.badge_progress = 1.0
+        self.badge_started = 0
+        self.badge_rect = None  # onde foi desenhado por último (para o clique)
+        self.badge_hover = False
+        self.on_badge = None
+        self.ignore_double = False  # o 2º clique de um duplo clique no console do canto não abre nada
         self.loader = TextureLoader(self._on_loaded)
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -283,15 +300,20 @@ class Shelf(Gtk.Widget):
         scroll = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.BOTH_AXES)
         scroll.connect("scroll", self._on_scroll)
         self.add_controller(scroll)
+        motion = Gtk.EventControllerMotion.new()
+        motion.connect("motion", lambda _c, x, y: self._update_hover(x, y))
+        motion.connect("leave", lambda _c: self._update_hover(-1, -1))
+        self.add_controller(motion)
 
     # ---- Dados -----------------------------------------------------------------
-    def set_items(self, items, index=0, animate=True):
-        """Troca as caixas da prateleira (ao mudar de aba ou buscar)."""
+    def set_items(self, items, index=0, animate=True, loop=False):
+        """Troca as caixas da prateleira (ao mudar de aba ou buscar). loop=True: roda sem fim."""
         keep = {id(item) for item in items}
         for item in self.items:
             if id(item) not in keep:
                 self._release(item)
         self.items = items
+        self.loop = loop and len(items) > 1
         self.positions = {id(item): i for i, item in enumerate(items)}
         self.index = max(0, min(index, len(items) - 1)) if items else 0
         self.position = float(self.index)
@@ -314,10 +336,14 @@ class Shelf(Gtk.Widget):
         return self.items[self.index] if self.items else None
 
     def move(self, step):
-        """Move a seleção (-1 esquerda, +1 direita)."""
+        """Move a seleção (-1 esquerda, +1 direita). Na roda sem fim, do último vai para o primeiro."""
         if not self.items:
             return
-        target = max(0, min(self.index + step, len(self.items) - 1))
+        target = self.index + step
+        if self.loop:
+            target = self._rewind(target)
+        else:
+            target = max(0, min(target, len(self.items) - 1))
         if target != self.index:
             self.index = target
             if self.on_step:
@@ -327,8 +353,36 @@ class Shelf(Gtk.Widget):
             self.on_selected(self.index)
 
     def select(self, index):
-        """Seleciona a caixa de uma posição."""
-        self.move(index - self.index)
+        """Seleciona a caixa de uma posição (na roda sem fim, pelo caminho mais curto)."""
+        step = index - self.index
+        if self.loop:
+            count = len(self.items)
+            step = (step + count // 2) % count - count // 2
+        self.move(step)
+
+    def _rewind(self, target):
+        """Roda sem fim: traz o alvo de volta para 0..n-1 e desloca a posição de voltas inteiras.
+
+        Deslocar a posição de n caixas não muda nada na tela (o desenho é o
+        mesmo a cada volta), então a animação continua lisa e os números nunca
+        crescem: é a "reiniciada" da roda a cada volta.
+        """
+        count = len(self.items)
+        wrapped = target % count
+        shift = wrapped - target
+        if shift:
+            self.position += shift
+            self.drag_start += shift
+            self.drag_samples = [(time, position + shift) for time, position in self.drag_samples]
+        return wrapped
+
+    def _distance(self, a, b):
+        """Quantas caixas separam duas posições (na roda sem fim, pelo lado mais curto)."""
+        distance = abs(a - b)
+        if self.loop:
+            distance %= len(self.items)
+            distance = min(distance, len(self.items) - distance)
+        return distance
 
     # ---- Texturas ----------------------------------------------------------------
     def _schedule(self):
@@ -336,11 +390,13 @@ class Shelf(Gtk.Widget):
         count = len(self.items)
         for distance in range(PRELOAD + 1):
             for i in {self.index - distance, self.index + distance}:
+                if self.loop:
+                    i %= count
                 if 0 <= i < count and self.items[i].state == EMPTY:
                     self.loader.request(self.items[i], distance)
         for key, item in list(self.loaded.items()):
             position = self.positions.get(key)
-            if position is None or abs(position - self.index) > KEEP:
+            if position is None or self._distance(position, self.index) > KEEP:
                 self._release(item)
 
     def _release(self, item):
@@ -366,7 +422,7 @@ class Shelf(Gtk.Widget):
             self._release(item)
             return GLib.SOURCE_REMOVE
         self.loaded[id(item)] = item
-        if abs(position - self.position) > VISIBLE + 1:
+        if self._distance(position, self.position) > VISIBLE + 1:
             item.shown_aspect = item.aspect
         else:
             self.queue_draw()
@@ -398,8 +454,14 @@ class Shelf(Gtk.Widget):
         if self.reveal < 1:
             self.reveal = min(1.0, self.reveal + dt * 2.8)
             busy = True
+        if self.badge is not None and self.badge_progress < 1:
+            if not self.badge_started:
+                self.badge_started = now
+            self.badge_progress = min(1.0, (now - self.badge_started) / (BADGE_SECONDS * 1_000_000))
+            busy = True
         first = max(0, math.floor(self.position) - VISIBLE)
-        for item in self.items[first : math.ceil(self.position) + VISIBLE + 1]:
+        nearby = self.items if self.loop else self.items[first : math.ceil(self.position) + VISIBLE + 1]
+        for item in nearby:
             if abs(item.shown_aspect - item.aspect) > 0.002:
                 item.shown_aspect += (item.aspect - item.shown_aspect) * (1 - math.exp(-dt * 14))
                 busy = True
@@ -458,8 +520,13 @@ class Shelf(Gtk.Widget):
         """Medidas usadas no desenho: tamanho da tela, da caixa central e espaço entre lombadas."""
         width, height = self.get_width(), self.get_height()
         box_height = height * 0.6
-        center = self.items[self.index]
-        base_width, base_height = self._item_size(center, box_height, width)
+        if self.items[0].boxed:
+            base_width, base_height = self._item_size(self.items[self.index], box_height, width)
+        else:
+            # Consoles: o espaço entre eles é sempre o mesmo, seja qual for o selecionado
+            # (o PS2, em pé e estreito, não pode puxar os vizinhos para perto).
+            base_width, base_height = max(
+                (self._item_size(item, box_height, width) for item in self.items), key=lambda size: size[0])
         return width, height, box_height, base_width, max(base_height * 0.095, 16)
 
     # ---- Desenho ---------------------------------------------------------------
@@ -474,11 +541,10 @@ class Shelf(Gtk.Widget):
         floor = height * (FLOOR - HORIZON)  # altura do chão em relação ao ponto de fuga
         rise = (1 - self.reveal) ** 2 * 500
 
-        first = max(0, math.floor(self.position) - self.visible)
-        last = min(len(self.items) - 1, math.ceil(self.position) + self.visible)
         entries = []
-        for i in sorted(range(first, last + 1), key=lambda i: -abs(i - self.position)):
-            item = self.items[i]
+        count = len(self.items)
+        for i in sorted(self._drawn_slots(), key=lambda i: -abs(i - self.position)):
+            item = self.items[i % count]  # na roda sem fim, a mesma caixa se repete a cada volta
             offset = i - self.position
             x, z, angle = self._place(offset, base_width, spine_step)
             item_width, item_height = self._item_size(item, box_height, width)
@@ -497,7 +563,7 @@ class Shelf(Gtk.Widget):
             if self.reflections:
                 for entry in entries:
                     self._draw_item(boxes, entry, floor, True)
-            hidden = {} if self.use_matrix else self._hidden_parts(entries, floor)
+            hidden = {} if self.use_matrix or self.loop else self._hidden_parts(entries, floor)
             for entry in entries:
                 self._draw_item(boxes, entry, floor, False, hidden.get(id(entry[0])))
             node = boxes.to_node()
@@ -505,6 +571,108 @@ class Shelf(Gtk.Widget):
                 snapshot.append_node(node)
             self.cache_key, self.cache_node = (None, None) if self.moving else (key, node)
         self._draw_caption(snapshot, width, height)
+        if self.badge is not None:
+            self._draw_badge(snapshot, width, height)
+
+    # ---- Console no canto ------------------------------------------------------
+    def dock_badge(self, item):
+        """Entrou num console: a imagem dele encolhe e desliza até o canto de baixo, à esquerda."""
+        start = self._front_rect(item) if self.items and item.front is not None else None
+        if start is None:
+            self.badge = None
+            return
+        self.badge = (item.front, item.glow, start)
+        self.badge_progress = 0.0
+        self.badge_started = 0
+        self._animate()
+
+    def clear_badge(self):
+        """Tira o console do canto (voltou para o Início)."""
+        self.badge = None
+        self.badge_rect = None
+        self._update_hover(-1, -1)
+        self.queue_draw()
+
+    def _front_rect(self, item):
+        """Retângulo da frente da caixa selecionada na tela, como está desenhada agora."""
+        width, height, box_height, base_width, spine_step = self._layout_base()
+        if width <= 0 or height <= 0:
+            return None
+        self.vx, self.vy, self.width = width / 2, height * HORIZON, width
+        floor = height * (FLOOR - HORIZON)
+        offset = self.index - self.position
+        x, z, angle = self._place(offset, base_width, spine_step)
+        item_width, item_height = self._item_size(item, box_height, width)
+        entry = (item, x, z - (1 - self.reveal) ** 2 * 500, angle, item_width, item_height, offset)
+        for a, b, kind in self._faces(entry):
+            face = self._screen_face(a, b, floor - item_height, floor) if kind == "front" else None
+            if face is not None:
+                _a, _b, left, right, top_a, bottom_a, top_b, bottom_b = face
+                top, bottom = min(top_a, top_b), max(bottom_a, bottom_b)
+                return left, top, right - left, bottom - top
+        return None
+
+    def _draw_badge(self, snapshot, width, height):
+        """Desenha o console a caminho do canto (encolhendo, descendo e indo para a esquerda) ou já lá."""
+        front, glow, (sx, sy, sw, sh) = self.badge
+        aspect = front.get_width() / max(1, front.get_height())
+        eh = height * BADGE_HEIGHT
+        ew = eh * aspect
+        if ew > width * BADGE_WIDTH:
+            ew = width * BADGE_WIDTH
+            eh = ew / aspect
+        ex, ey = BADGE_MARGIN, height - eh - BADGE_MARGIN / 2
+        t = self.badge_progress
+        shrink = 1 - (1 - t) ** 3  # encolhe e desce rápido no começo...
+        glide = t * t * (3 - 2 * t)  # ...e vai para o lado um pouco depois: caminho em curva
+        w, h = sw + (ew - sw) * shrink, sh + (eh - sh) * shrink
+        cx = sx + sw / 2 + (ex + ew / 2 - sx - sw / 2) * glide
+        cy = sy + sh / 2 + (ey + eh / 2 - sy - sh / 2) * shrink
+        rect = _rect(cx - w / 2, cy - h / 2, w, h)
+        self.badge_rect = (cx - w / 2, cy - h / 2, w, h)
+        snapshot.append_scaled_texture(front, FILTER, rect)
+        if glow is not None:
+            snapshot.push_opacity(min(1.0, 1.0 - 0.45 * shrink + (0.3 if self.badge_hover else 0)))
+            snapshot.append_scaled_texture(glow, FILTER, rect)
+            snapshot.pop()
+
+    def _in_badge(self, x, y):
+        """O ponto (x, y) está em cima do console do canto?"""
+        if self.badge is None or self.badge_rect is None:
+            return False
+        left, top, w, h = self.badge_rect
+        return left <= x <= left + w and top <= y <= top + h
+
+    def _update_hover(self, x, y):
+        """Mãozinha e brilho mais forte quando o mouse passa sobre o console do canto."""
+        hover = self.on_badge is not None and self._in_badge(x, y)
+        if hover != self.badge_hover and not self.dragging:
+            self.badge_hover = hover
+            self.set_cursor_from_name("pointer" if hover else None)
+            self.queue_draw()
+
+    def _drawn_slots(self):
+        """Lugares da prateleira desenhados agora (na roda sem fim podem passar de 0..n-1)."""
+        if self.loop:
+            reach = self._loop_reach()
+            return range(math.floor(self.position) - reach, math.ceil(self.position) + reach + 1)
+        first = max(0, math.floor(self.position) - self.visible)
+        last = min(len(self.items) - 1, math.ceil(self.position) + self.visible)
+        return range(first, last + 1)
+
+    def _loop_reach(self):
+        """Roda sem fim: a partir de quantos lugares de distância a caixa já está toda fora da tela.
+
+        Só essas poucas são desenhadas (5 a 9 na prática), não importa quantas voltas a roda deu.
+        """
+        width, _height, _box_height, base_width, spine_step = self._layout_base()
+        half = width * 0.34 / 2  # nenhuma caixa fica mais larga que 34% da tela (_item_size)
+        for reach in range(1, self.visible + 1):
+            x, z, _angle = self._place(reach, base_width, spine_step)
+            # Borda mais próxima do centro, no pior caso (girada e mais ao fundo): já passou da tela?
+            if (x - half) * PERSPECTIVE / (PERSPECTIVE - z + half) > width / 2:
+                return reach
+        return self.visible
 
     def _faces(self, entry):
         """Faces da caixa viradas para quem olha: [(a, b, tipo)], da mais distante para a mais próxima."""
@@ -745,8 +913,10 @@ class Shelf(Gtk.Widget):
 
     def _draw_caption(self, snapshot, width, height):
         """Escreve o nome e as informações da caixa selecionada embaixo dela."""
-        nearest = min(len(self.items) - 1, max(0, round(self.position)))
-        item = self.items[nearest]
+        nearest = round(self.position)
+        if not self.loop:
+            nearest = min(len(self.items) - 1, max(0, nearest))
+        item = self.items[nearest % len(self.items)]
         alpha = max(0.0, 1 - abs(self.position - nearest) * 2.6) * self.reveal
         if alpha <= 0.01:
             return
@@ -793,23 +963,28 @@ class Shelf(Gtk.Widget):
         return self.get_width() / 2 + x * PERSPECTIVE / (PERSPECTIVE - z)
 
     def _item_at(self, x):
-        """Índice da caixa mais próxima de uma posição horizontal da tela."""
+        """Lugar da caixa mais próxima de uma posição horizontal da tela (fora de 0..n-1 na roda sem fim)."""
         _w, _h, _bh, base_width, spine_step = self._layout_base()
-        return min(
-            range(len(self.items)),
-            key=lambda i: abs(self._screen_x(i - self.position, base_width, spine_step) - x),
-        )
+        slots = self._drawn_slots() if self.loop else range(len(self.items))
+        return min(slots, key=lambda i: abs(self._screen_x(i - self.position, base_width, spine_step) - x))
 
-    def _on_click(self, _gesture, presses, x, _y):
-        """Um clique seleciona a caixa; dois cliques em cima dela abrem."""
+    def _on_click(self, _gesture, presses, x, y):
+        """Um clique seleciona a caixa; dois cliques em cima dela abrem. O console do canto volta ao Início."""
         self.grab_focus()
         if not self.items:
             return
+        if presses == 1 and self.on_badge is not None and self._in_badge(x, y):
+            self.ignore_double = True
+            self.on_badge()
+            return
+        if presses == 2 and self.ignore_double:
+            return
+        self.ignore_double = False
         if presses == 1:
             self.dragged = False
             best = self._item_at(x)
             if best != self.index:
-                self.select(best)
+                self.move(best - self.index)  # lugar exato clicado (na roda, pode ser de outra volta)
         elif presses == 2 and not self.dragged:
             self.on_activate(self.items[self.index])
 
@@ -838,15 +1013,20 @@ class Shelf(Gtk.Widget):
             self.set_cursor_from_name("grabbing")
         last = len(self.items) - 1
         position = self.drag_start - dx / self.drag_step
-        # Nas pontas a prateleira "estica" um pouco, mas não passa do limite.
-        if position < 0:
+        # Nas pontas a prateleira "estica" um pouco, mas não passa do limite (a roda sem fim não tem pontas).
+        if self.loop:
+            pass
+        elif position < 0:
             position = -0.35 * (1 - math.exp(position / 0.35))
         elif position > last:
             position = last + 0.35 * (1 - math.exp(-(position - last) / 0.35))
         self.position = position
         now = GLib.get_monotonic_time()
         self.drag_samples = [s for s in self.drag_samples if now - s[0] < 100_000] + [(now, position)]
-        nearest = max(0, min(last, round(position)))
+        if self.loop:
+            nearest = self._rewind(round(position))  # passou de uma volta: reinicia a contagem
+        else:
+            nearest = max(0, min(last, round(position)))
         if nearest != self.index:
             self.index = nearest
             if self.on_step:
@@ -861,6 +1041,7 @@ class Shelf(Gtk.Widget):
             return
         self.dragging = False
         self.set_cursor(None)
+        self.badge_hover = False
         # Velocidade só dos últimos 100 ms (se o mouse parou antes de soltar, não há arremesso),
         # limitada para um puxão rápido não atravessar a prateleira inteira.
         now = GLib.get_monotonic_time()
@@ -871,7 +1052,9 @@ class Shelf(Gtk.Widget):
             if t1 - t0 >= 15_000:
                 velocity = max(-30.0, min(30.0, (p1 - p0) / ((t1 - t0) / 1_000_000)))
         target = round(self.position + velocity * 0.18)
-        self.move(max(0, min(target, len(self.items) - 1)) - self.index)
+        if not self.loop:
+            target = max(0, min(target, len(self.items) - 1))
+        self.move(target - self.index)
         self._animate()
 
     def _on_scroll(self, _controller, dx, dy):

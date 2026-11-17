@@ -23,7 +23,10 @@ Nintendo 64 — nintendo 64/console.png
 https://commons.wikimedia.org/wiki/File:N64-Console-Set.png
 Imagem de Evan-Amos, em domínio público.
 
-Neo Geo — neo-geo/console.png (original: Neo-Geo-AES-Console-Set.png)
+Neo Geo — neo-geo/console.png: foto do Neo Geo CD fornecida pelo usuário, com o
+fundo branco removido. Imagem anterior (Neo Geo AES):
 https://commons.wikimedia.org/wiki/File:Neo-Geo-AES-Console-Set.png
-Imagem de Evan-Amos, em domínio público. O halo console-outline.png foi gerado
-a partir da silhueta da imagem.
+
+Os halos console-outline.png do Super Nintendo e do Neo Geo foram gerados a
+partir da silhueta de cada imagem, com o mesmo perfil dos halos do PS2, GBA e
+GameCube (borda fina forte + brilho suave), na mesma espessura na tela.
